@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+
+# wasm-pack output (generated into the web app)
+/crates/gnss-wasm/pkg
+/web/src/wasm
+
+# Node / Next.js
+node_modules
+/web/.next
+/web/out
+/web/next-env.d.ts
+/web/tsconfig.tsbuildinfo
+.pnpm-store
+
+# public/data is a build artifact copied from data/ by scripts/sync-data.mjs
+/web/public/data
+
+# Python
+__pycache__/
+*.pyc
+
+# Env
+.env*.local
+
+# OS
+.DS_Store
+
+# Claude Code local permission grants (session-specific, not project config)
+.claude/settings.local.json

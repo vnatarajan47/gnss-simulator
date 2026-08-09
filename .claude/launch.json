@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd \"$(dirname \"$0\")/../web\" 2>/dev/null || cd /Users/varun/Documents/gnss_simulator/web; exec npm run dev"
+      ],
+      "port": 3000
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/gnss-core", "crates/gnss-wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+gnss-core = { path = "crates/gnss-core" }
+
+# Small code size matters: this workspace ships to the browser as wasm.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

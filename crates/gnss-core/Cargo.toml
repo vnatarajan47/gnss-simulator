@@ -1,0 +1,26 @@
+[package]
+name = "gnss-core"
+description = "RINEX Nav parsing, broadcast-ephemeris propagation and look-angle computation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# NOTE: default features are off on purpose.
+#
+# `rinex`'s `nav` feature (which provides `Ephemeris::kepler2position`) pulls in
+# `anise`, whose non-optional dependency set includes `memmap2`, `ureq` and
+# `pyo3` -- none of which build for `wasm32-unknown-unknown`. We therefore use
+# `rinex` strictly as a *parser* and implement propagation ourselves.
+# See docs/adr/0005-hand-rolled-ephemeris-propagation.md.
+rinex = { version = "0.22", default-features = false, features = ["flate2"] }
+# Pure-Rust inflate backend (miniz_oxide) so gzip-compressed RINEX works in
+# the browser as well as natively. Already in the tree via `rinex`.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+thiserror = "2"
+
+[dev-dependencies]
+approx = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
