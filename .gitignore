@@ -27,5 +27,6 @@ __pycache__/
 # OS
 .DS_Store
 
-# Claude Code local permission grants (session-specific, not project config)
+# Claude Code local permission grants and runtime state (session-specific)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
