@@ -8,6 +8,7 @@
 //! See `docs/adr/0005-hand-rolled-ephemeris-propagation.md`.
 
 use std::io::{BufReader, Read};
+use std::panic::AssertUnwindSafe;
 
 use rinex::prelude::{Constellation as RinexConstellation, Rinex};
 
@@ -34,8 +35,18 @@ pub fn parse_nav(bytes: &[u8]) -> Result<EphemerisSet, Error> {
         bytes
     };
 
-    let mut reader = BufReader::new(payload);
-    let rinex = Rinex::parse(&mut reader).map_err(|e| Error::Rinex(e.to_string()))?;
+    // The `rinex` parser panics rather than erroring on some malformed input
+    // (e.g. a zero-length line: parsing.rs slices `[4..]` unchecked). We feed
+    // it files fetched from a 9-year archive spanning several RINEX revisions,
+    // so that is reachable in normal use — and in WASM an escaping panic traps
+    // and poisons the module, killing the page rather than showing an error.
+    // Contain it here so callers only ever see an `Error`.
+    let rinex = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let mut reader = BufReader::new(payload);
+        Rinex::parse(&mut reader)
+    }))
+    .map_err(|_| Error::ParserPanicked)?
+    .map_err(|e| Error::Rinex(e.to_string()))?;
 
     if !rinex.is_navigation_rinex() {
         return Err(Error::NotNavigationRinex);
@@ -177,5 +188,31 @@ mod tests {
     fn non_navigation_input_is_rejected() {
         let err = parse_nav(b"not a rinex file at all\n");
         assert!(err.is_err());
+    }
+
+    /// A zero-length line inside the record body makes the `rinex` parser
+    /// panic (parsing.rs slices `[4..]` unchecked). Real archive files end
+    /// with a trailing newline, so this is reachable from ordinary input --
+    /// it must surface as an `Error`, never as an escaping panic.
+    #[test]
+    fn a_parser_panic_is_contained_as_an_error() {
+        let malformed = concat!(
+            "     3.03           N: GNSS NAV DATA    G: GPS              RINEX VERSION / TYPE\n",
+            "                                                            END OF HEADER\n",
+            "G01 2019 03 15 00 00 00-1.809163950384e-04-7.503331289627e-12 0.000000000000e+00\n",
+            "\n",
+            "\n",
+        );
+
+        // Keep the panic hook quiet so the test output stays readable.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = parse_nav(malformed.as_bytes());
+        std::panic::set_hook(previous);
+
+        assert!(
+            matches!(result, Err(Error::ParserPanicked)),
+            "expected a contained ParserPanicked error, got {result:?}"
+        );
     }
 }

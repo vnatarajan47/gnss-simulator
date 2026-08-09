@@ -1,11 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import ConstellationStatus from "@/components/ConstellationStatus";
 import SkyPlot from "@/components/SkyPlot";
-import { loadSkyplotter, type Skyplotter } from "@/lib/wasm";
+import { ACTIVE_CONSTELLATION_CODES, ARCHIVE_START } from "@/lib/coverage";
+import { dateOf, loadEphemeris, type EphemerisMeta } from "@/lib/ephemeris";
 import type { Observer, SkyView } from "@/lib/types";
+import type { Skyplotter } from "@/lib/wasm";
 
 // Leaflet reaches for `window` during module evaluation, so the map cannot be
 // server-rendered.
@@ -14,49 +17,73 @@ const MapPanel = dynamic(() => import("@/components/MapPanel"), {
   loading: () => <Placeholder>Loading map…</Placeholder>,
 });
 
-/**
- * The RINEX Nav file shipped in `data/`, copied into `public/` by
- * `scripts/sync-data.mjs`. Phase 1 uses a single static file; fetching the
- * right day from CDDIS on demand is a fast-follow.
- */
-const NAV_FILE = "/data/BRDC00WRD_R_20250010000_01D_GN.rnx";
-
-/** The UTC day the bundled file covers. */
-const COVERAGE = {
-  startIso: "2025-01-01T00:00",
-  endIso: "2025-01-02T00:00",
-  defaultIso: "2025-01-01T12:00",
-};
-
 const DEFAULT_OBSERVER: Observer = { lat: 39.7392, lon: -104.9903, altM: 1609 };
 
-/** Interpret a `datetime-local` value as UTC rather than browser-local. */
+/** `datetime-local` wants `YYYY-MM-DDTHH:MM`; we treat the value as UTC. */
+function toInputValue(date: Date): string {
+  return date.toISOString().slice(0, 16);
+}
+
+/**
+ * Default to midday on the most recent complete UTC day.
+ *
+ * Today's broadcast file only covers the hours already elapsed, so yesterday
+ * avoids opening on an epoch the data cannot answer for.
+ */
+function defaultEpoch(): string {
+  const yesterday = new Date(Date.now() - 86_400_000);
+  return `${yesterday.toISOString().slice(0, 10)}T12:00`;
+}
+
 function isoToUnixSeconds(value: string): number {
   return Date.parse(`${value}:00Z`) / 1000;
 }
 
 export default function Workbench() {
-  const [plotter, setPlotter] = useState<Skyplotter | null>(null);
   const [observer, setObserver] = useState<Observer>(DEFAULT_OBSERVER);
-  const [epoch, setEpoch] = useState(COVERAGE.defaultIso);
+  const [epoch, setEpoch] = useState(defaultEpoch);
   const [maskDeg, setMaskDeg] = useState(5);
-  const [view, setView] = useState<SkyView | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  // Parse the ephemeris file once, then reuse it for every click.
+  const [plotter, setPlotter] = useState<Skyplotter | null>(null);
+  const [meta, setMeta] = useState<EphemerisMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [computeError, setComputeError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [view, setView] = useState<SkyView | null>(null);
+
+  const requestedDate = dateOf(epoch);
+  const maxEpoch = useMemo(() => toInputValue(new Date()), []);
+
+  // Guards against a slow response for an old date overwriting a newer one.
+  const latestRequest = useRef(0);
+
+  // Refetch only when the UTC *day* changes — moving the clock within a day
+  // reuses the parsed ephemeris.
   useEffect(() => {
-    let cancelled = false;
-    loadSkyplotter(NAV_FILE)
-      .then((instance) => {
-        if (!cancelled) setPlotter(instance);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) return;
+
+    const token = ++latestRequest.current;
+    setLoading(true);
+    setLoadError(null);
+
+    loadEphemeris(requestedDate, ACTIVE_CONSTELLATION_CODES)
+      .then(({ plotter: instance, meta: info }) => {
+        if (token !== latestRequest.current) return;
+        setPlotter(instance);
+        setMeta(info);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(String(cause));
+        if (token !== latestRequest.current) return;
+        setPlotter(null);
+        setMeta(null);
+        setView(null);
+        setLoadError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (token === latestRequest.current) setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [requestedDate]);
 
   // Recompute whenever the observer, epoch or mask changes.
   useEffect(() => {
@@ -70,20 +97,26 @@ export default function Workbench() {
         maskDeg,
       ) as SkyView;
       setView(result);
-      setError(null);
+      setComputeError(null);
     } catch (cause: unknown) {
       setView(null);
-      setError(String(cause));
+      setComputeError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [plotter, observer, epoch, maskDeg]);
 
   const onSelect = useCallback((lat: number, lon: number) => {
-    // Altitude is not resolved from the map yet -- a DEM lookup is phase 3.
+    // Altitude is not resolved from the map yet — a DEM lookup is phase 3.
     // Ellipsoidal height affects elevation angle by well under 0.01 deg.
     setObserver((previous) => ({ ...previous, lat, lon }));
+    setNotice(null);
+  }, []);
+
+  const onRejected = useCallback(() => {
+    setNotice("Outside the supported region — phase 1 covers the continental US.");
   }, []);
 
   const satellites = useMemo(() => view?.satellites ?? [], [view]);
+  const error = loadError ?? computeError;
 
   return (
     <main style={styles.page}>
@@ -97,20 +130,26 @@ export default function Workbench() {
       <div style={styles.columns}>
         <section style={styles.mapColumn}>
           <div style={styles.mapFrame}>
-            <MapPanel observer={observer} onSelect={onSelect} />
+            <MapPanel observer={observer} onSelect={onSelect} onRejected={onRejected} />
           </div>
-          <p style={styles.hint}>Click anywhere on the map to move the receiver.</p>
+          <p style={styles.hint}>
+            <span style={styles.legendSwatch} /> Click inside the outlined region to
+            move the receiver. Shaded areas are outside phase-1 coverage.
+          </p>
+          {notice && <p style={styles.notice}>{notice}</p>}
         </section>
 
         <section style={styles.plotColumn}>
+          <ConstellationStatus />
+
           <div style={styles.controls}>
             <label style={styles.label}>
               Epoch (UTC)
               <input
                 type="datetime-local"
                 value={epoch}
-                min={COVERAGE.startIso}
-                max={COVERAGE.endIso}
+                min={`${ARCHIVE_START}T00:00`}
+                max={maxEpoch}
                 onChange={(event) => setEpoch(event.target.value)}
                 style={styles.input}
               />
@@ -128,10 +167,17 @@ export default function Workbench() {
             </label>
           </div>
 
-          {!plotter && !error && <Placeholder>Loading ephemeris…</Placeholder>}
+          {loading && <Placeholder>Fetching ephemeris for {requestedDate}…</Placeholder>}
           {error && <p style={styles.error}>{error}</p>}
 
-          {view && (
+          {meta?.partial && !loading && !error && (
+            <p style={styles.warning}>
+              Today&rsquo;s broadcast file is still accumulating — epochs later than
+              the current hour will have no ephemeris.
+            </p>
+          )}
+
+          {view && !loading && (
             <>
               <SkyPlot satellites={satellites} elevationMaskDeg={maskDeg} />
               <dl style={styles.stats}>
@@ -165,6 +211,13 @@ export default function Workbench() {
           <p style={styles.footnote}>
             Receiver {observer.lat.toFixed(4)}&deg;, {observer.lon.toFixed(4)}&deg;,{" "}
             {observer.altM} m ellipsoidal
+            {meta && (
+              <>
+                <br />
+                {meta.source} · {meta.records} records ·{" "}
+                {meta.cached ? "cached" : "fetched"} in {meta.elapsedMs} ms
+              </>
+            )}
           </p>
         </section>
       </div>
@@ -194,8 +247,22 @@ const styles: Record<string, React.CSSProperties> = {
   subtitle: { fontSize: 13, color: "#6b7280" },
   columns: { display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" },
   mapColumn: { flex: "1 1 520px", minWidth: 320 },
-  mapFrame: { height: 560, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden" },
+  mapFrame: {
+    height: 560,
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    overflow: "hidden",
+  },
   hint: { fontSize: 12, color: "#6b7280", marginTop: 6 },
+  legendSwatch: {
+    display: "inline-block",
+    width: 18,
+    height: 10,
+    border: "2px dashed #2563eb",
+    marginRight: 6,
+    verticalAlign: "middle",
+  },
+  notice: { fontSize: 12, color: "#b45309", marginTop: 4 },
   plotColumn: { flex: "0 1 460px", minWidth: 320 },
   controls: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 },
   label: { display: "flex", flexDirection: "column", gap: 4, fontSize: 13 },
@@ -214,6 +281,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontVariantNumeric: "tabular-nums",
   },
   placeholder: { color: "#6b7280", fontSize: 14 },
+  warning: { color: "#b45309", fontSize: 12 },
   error: { color: "#b91c1c", fontSize: 13, whiteSpace: "pre-wrap" },
-  footnote: { fontSize: 12, color: "#6b7280", marginTop: 12 },
+  footnote: { fontSize: 12, color: "#6b7280", marginTop: 12, lineHeight: 1.5 },
 };

@@ -80,4 +80,7 @@ pub enum Error {
 
     #[error("failed to decompress gzip input: {0}")]
     Decompression(String),
+
+    #[error("the RINEX parser panicked; the file is malformed or uses an unsupported layout")]
+    ParserPanicked,
 }

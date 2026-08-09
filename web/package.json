@@ -3,11 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "sync:data": "node scripts/sync-data.mjs",
     "build:wasm": "cd ../crates/gnss-wasm && wasm-pack build --target web --out-dir ../../web/src/wasm --out-name gnss_wasm",
-    "predev": "npm run sync:data",
     "dev": "next dev",
-    "prebuild": "npm run sync:data",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

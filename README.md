@@ -29,8 +29,8 @@ cd web && npm install && npm run build:wasm && npm run dev
 ```
 
 Then open <http://localhost:3000>. `build:wasm` compiles `gnss-wasm` into
-`web/src/wasm/`, and `npm run dev` copies `data/*.rnx` into `web/public/data/`
-before starting Next.
+`web/src/wasm/`. Ephemeris is fetched on demand and needs network access on
+first use of a given day.
 
 Run the Rust test suite, including the cross-validation:
 
@@ -40,7 +40,9 @@ cargo test
 
 ## How it works
 
-1. `web/` fetches a RINEX Nav file and hands the bytes to WASM.
+1. `/api/ephemeris?date=…` fetches that UTC day's broadcast file from BKG,
+   caches it in `data/cache/`, trims it to the active constellations, and
+   returns it. The browser hands those bytes to WASM.
 2. `gnss-core` parses it into per-satellite broadcast ephemeris blocks and, for
    the requested instant, selects the block whose time-of-ephemeris is nearest
    (GPS fits a 4-hour arc centred on ToE, so a daily file holds ~12 per SV).
@@ -56,6 +58,10 @@ cargo test
 
 Unhealthy satellites are excluded by default. On the bundled 2025-01-01 file
 that means G01 and G22, which broadcast health word 63 all day.
+
+Only the *fetch* is server-side, and only because the archive sends no CORS
+header. All the arithmetic still runs in the browser — see
+[ADR-0006](./docs/adr/0006-server-side-ephemeris-proxy.md).
 
 ### Validating the math
 
@@ -87,13 +93,20 @@ IQ generation, automated CDDIS fetching, GLONASS, and deployment.
 
 ## Ephemeris data
 
-`data/` holds a GPS-only subset of BKG's `BRDC00WRD_R_20250010000_01D_MN.rnx`
-broadcast product for 2025-01-01 (454 ephemeris records, all 32 PRNs). The UI
-is pinned to that UTC day because that is what the file covers.
+Any UTC day from **2017-06-01 to today** works; pick an epoch and the app
+fetches what it needs. Source is BKG's IGS mirror of the merged broadcast
+product (`BRDC00WRD_R_*_01D_MN.rnx.gz`), not CDDIS as ADR-0004 names — CDDIS
+distributes the same IGS product but requires an Earthdata login, and BKG does
+not. Files land in `data/cache/` (gitignored), so a repeated day is served
+locally in tens of milliseconds instead of ~5 s.
 
-Fetching the right day on demand from [CDDIS](https://cddis.nasa.gov/) is a
-fast-follow, not part of phase 1. Note that CDDIS requires an Earthdata login,
-which is one of the things ADR-0004 has to account for.
+Two edges worth knowing:
+
+- **Today's file is partial.** Broadcast files accumulate through the day, so
+  an epoch later than the current hour has no ephemeris. The UI says so.
+- `data/BRDC00WRD_R_20250010000_01D_GN.rnx` is still committed, but only as the
+  fixture for `cargo test`. The app no longer reads it, so a cold cache with no
+  network means no sky plot.
 
 `gnss-core` accepts gzipped RINEX directly, so files can be cached as
 downloaded.
@@ -111,6 +124,9 @@ own propagator and is out of scope.
 
 ## Architecture decisions
 
-See [`docs/adr/`](./docs/adr/). ADRs 0001–0004 are stubs awaiting their
-rationale; [ADR-0005](./docs/adr/0005-hand-rolled-ephemeris-propagation.md) is
-written up and explains why the `rinex` crate is used only as a parser.
+See [`docs/adr/`](./docs/adr/). ADRs 0001–0004 cover the language, execution
+model, frontend framework and ephemeris source.
+[ADR-0005](./docs/adr/0005-hand-rolled-ephemeris-propagation.md) explains why
+the `rinex` crate is used only as a parser;
+[ADR-0006](./docs/adr/0006-server-side-ephemeris-proxy.md) amends ADR-0002 to
+cover the on-demand fetch route.

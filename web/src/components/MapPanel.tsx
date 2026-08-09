@@ -4,14 +4,17 @@ import { useEffect } from "react";
 import {
   CircleMarker,
   MapContainer,
+  Polygon,
+  Rectangle,
   TileLayer,
   useMap,
   useMapEvents,
 } from "react-leaflet";
-import type { LatLngBoundsExpression } from "leaflet";
+import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import type { Observer } from "@/lib/types";
+import { CONUS, isWithinConus } from "@/lib/coverage";
 
 /**
  * Click-to-select map of the continental US.
@@ -24,45 +27,66 @@ import type { Observer } from "@/lib/types";
  * Must be loaded with `ssr: false`: Leaflet touches `window` at import time.
  */
 
-/** Roughly the continental US. */
 const CONUS_BOUNDS: LatLngBoundsExpression = [
-  [24.4, -125.0],
-  [49.5, -66.9],
+  [CONUS.south, CONUS.west],
+  [CONUS.north, CONUS.east],
 ];
 
 /**
- * Re-fit CONUS once the container has settled at its real size, and on every
- * later resize.
+ * Outer ring covering the whole world, with CONUS punched out as a hole.
  *
- * `MapContainer`'s own `bounds` prop is not enough: Leaflet fits against
- * whatever size the div reports at mount, which is frequently stale or zero,
- * leaving the map zoomed all the way out. The explicit `center`/`zoom` below
- * guarantees a sane starting view; this refines it to the exact bounds.
+ * Leaflet renders a two-ring polygon with the even-odd rule, so the second
+ * ring becomes a hole. That dims everything outside the supported region in
+ * one shape, rather than stitching four rectangles around it.
+ */
+const WORLD_RING: LatLngExpression[] = [
+  [-89.9, -179.9],
+  [-89.9, 179.9],
+  [89.9, 179.9],
+  [89.9, -179.9],
+];
+
+const CONUS_HOLE: LatLngExpression[] = [
+  [CONUS.south, CONUS.west],
+  [CONUS.south, CONUS.east],
+  [CONUS.north, CONUS.east],
+  [CONUS.north, CONUS.west],
+];
+
+/**
+ * Frame CONUS once the container has settled at its real size.
+ *
+ * Deliberately one-shot. Re-fitting from a ResizeObserver looks tempting but
+ * the observer fires on Leaflet's own layout writes, and the resulting
+ * continuous re-fit swallows map clicks.
  */
 function FitConus() {
   const map = useMap();
-
   useEffect(() => {
-    // One frame after mount the flex layout has resolved, so the container
-    // reports its real size and fitBounds picks the right zoom.
-    //
-    // Deliberately one-shot. Re-fitting from a ResizeObserver looks tempting
-    // but the observer fires on Leaflet's own layout writes, and the resulting
-    // continuous re-fit swallows map clicks.
     const frame = requestAnimationFrame(() => {
       map.invalidateSize();
       map.fitBounds(CONUS_BOUNDS, { padding: [8, 8] });
     });
     return () => cancelAnimationFrame(frame);
   }, [map]);
-
   return null;
 }
 
-function ClickHandler({ onSelect }: { onSelect: (lat: number, lon: number) => void }) {
+function ClickHandler({
+  onSelect,
+  onRejected,
+}: {
+  onSelect: (lat: number, lon: number) => void;
+  onRejected: () => void;
+}) {
   useMapEvents({
     click(event) {
-      onSelect(event.latlng.lat, event.latlng.lng);
+      const { lat, lng } = event.latlng;
+      if (isWithinConus(lat, lng)) {
+        onSelect(lat, lng);
+      } else {
+        onRejected();
+      }
     },
   });
   return null;
@@ -71,9 +95,11 @@ function ClickHandler({ onSelect }: { onSelect: (lat: number, lon: number) => vo
 export default function MapPanel({
   observer,
   onSelect,
+  onRejected,
 }: {
   observer: Observer;
   onSelect: (lat: number, lon: number) => void;
+  onRejected: () => void;
 }) {
   return (
     <MapContainer
@@ -87,8 +113,34 @@ export default function MapPanel({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+
+      {/* Dim the unsupported region. `interactive: false` lets clicks fall
+          through to the map, where ClickHandler decides whether to accept. */}
+      <Polygon
+        positions={[WORLD_RING, CONUS_HOLE]}
+        pathOptions={{
+          fillColor: "#1f2937",
+          fillOpacity: 0.55,
+          stroke: false,
+          interactive: false,
+        }}
+      />
+
+      {/* Outline the clickable region. */}
+      <Rectangle
+        bounds={CONUS_BOUNDS}
+        pathOptions={{
+          color: "#2563eb",
+          weight: 2,
+          fill: false,
+          dashArray: "5 4",
+          interactive: false,
+        }}
+      />
+
       <FitConus />
-      <ClickHandler onSelect={onSelect} />
+      <ClickHandler onSelect={onSelect} onRejected={onRejected} />
+
       {/* A CircleMarker, not a Marker: Leaflet's default marker icon is loaded
           from a relative asset path that bundlers rewrite incorrectly, and a
           vector marker sidesteps that entirely. */}

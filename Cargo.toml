@@ -12,8 +12,13 @@ license = "MIT OR Apache-2.0"
 gnss-core = { path = "crates/gnss-core" }
 
 # Small code size matters: this workspace ships to the browser as wasm.
+#
+# NOTE: `panic = "abort"` is deliberately NOT set. `gnss-core::parse_nav`
+# contains a third-party parser that panics on some malformed RINEX, and
+# containing it with `catch_unwind` requires unwinding to be available.
+# Aborting would trap and poison the WASM module instead of surfacing an
+# error, so the few kB of unwind tables are worth it.
 [profile.release]
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"

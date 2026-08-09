@@ -14,8 +14,8 @@ node_modules
 /web/tsconfig.tsbuildinfo
 .pnpm-store
 
-# public/data is a build artifact copied from data/ by scripts/sync-data.mjs
-/web/public/data
+# Ephemeris fetched on demand by /api/ephemeris and cached on disk
+/data/cache
 
 # Python
 __pycache__/
