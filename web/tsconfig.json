@@ -9,6 +9,10 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Tests are run directly by Node (which strips types), and Node's ESM
+    // resolution requires explicit file extensions. Safe here because the
+    // project is noEmit -- tsc only ever typechecks.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",

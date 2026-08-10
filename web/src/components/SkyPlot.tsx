@@ -1,53 +1,33 @@
 "use client";
 
+import { useMemo } from "react";
+
 import type { Satellite } from "@/lib/types";
+import {
+  CENTRE,
+  COMPASS,
+  MARKER_RADIUS,
+  RADIUS,
+  RINGS,
+  SIZE,
+  elevationColour,
+  layoutLabels,
+  pointOnCircleTowards,
+  pointOnRectTowards,
+  project,
+  type Point,
+  type Rect,
+} from "@/lib/skyPlotLayout";
 
 /**
  * Polar sky plot: azimuth is the angle (0 deg = north, clockwise), elevation
  * is the radius (90 deg at the centre, the horizon at the rim).
  *
  * Plain SVG rather than a charting library -- the projection is two lines of
- * trigonometry and the plot needs no axes, scales, or interaction.
+ * trigonometry and the plot needs no axes, scales, or interaction. All the
+ * geometry, including collision-avoiding label placement, lives in
+ * `lib/skyPlotLayout.ts` so it can be tested without a DOM.
  */
-
-const SIZE = 440;
-const CENTRE = SIZE / 2;
-const RADIUS = SIZE / 2 - 30;
-
-/** Elevation rings to draw, in degrees. */
-const RINGS = [0, 30, 60];
-
-const COMPASS = [
-  { label: "N", azimuth: 0 },
-  { label: "E", azimuth: 90 },
-  { label: "S", azimuth: 180 },
-  { label: "W", azimuth: 270 },
-];
-
-/** Project an azimuth/elevation pair to SVG coordinates. */
-function project(azimuthDeg: number, elevationDeg: number) {
-  const radius = RADIUS * (1 - elevationDeg / 90);
-  const angle = (azimuthDeg * Math.PI) / 180;
-  return {
-    x: CENTRE + radius * Math.sin(angle),
-    y: CENTRE - radius * Math.cos(angle),
-  };
-}
-
-/** Warm at the horizon, cool at the zenith -- reads as "how usable is this". */
-function elevationColour(elevationDeg: number): string {
-  const hue = 12 + (elevationDeg / 90) * 190;
-  return `hsl(${hue} 72% 45%)`;
-}
-
-/**
- * SBAS satellites are geostationary, which is worth showing: they never move,
- * and they sit in a tight clump rather than sweeping across the sky.
- */
-function isGeostationary(satellite: Satellite): boolean {
-  return satellite.sv.startsWith("S");
-}
-
 export default function SkyPlot({
   satellites,
   elevationMaskDeg,
@@ -56,6 +36,7 @@ export default function SkyPlot({
   elevationMaskDeg: number;
 }) {
   const maskRadius = RADIUS * (1 - elevationMaskDeg / 90);
+  const placements = useMemo(() => layoutLabels(satellites), [satellites]);
 
   return (
     <svg
@@ -125,46 +106,77 @@ export default function SkyPlot({
         );
       })}
 
-      {satellites.map((satellite) => {
-        const at = project(satellite.azimuth, satellite.elevation);
-        const label = String(satellite.prn);
-        // SBAS PRNs are three digits and do not fit the default marker.
-        const radius = label.length > 2 ? 12 : 9;
-        const fill = elevationColour(satellite.elevation);
+      {/* Leader lines beneath everything else, so markers and label chips sit
+          cleanly on top of their own connecting line. */}
+      {placements.map(
+        ({ satellite, marker, label, leader }) =>
+          leader && (
+            <LeaderLine key={`leader-${satellite.sv}`} marker={marker} label={label} />
+          ),
+      )}
 
+      {placements.map(({ satellite, marker, isSbas, label }) => {
+        const fill = elevationColour(satellite.elevation);
         return (
           <g key={satellite.sv}>
             {/* Geostationary augmentation satellites get a square marker, so
-                they read as a different kind of thing at a glance rather than
-                only by PRN. */}
-            {isGeostationary(satellite) ? (
+                they read as a different kind of thing at a glance. */}
+            {isSbas ? (
               <rect
-                x={at.x - radius}
-                y={at.y - radius}
-                width={radius * 2}
-                height={radius * 2}
-                rx={3}
+                x={marker.x - MARKER_RADIUS}
+                y={marker.y - MARKER_RADIUS}
+                width={MARKER_RADIUS * 2}
+                height={MARKER_RADIUS * 2}
+                rx={2}
                 fill={fill}
                 stroke="#111827"
-                strokeWidth={1.5}
+                strokeWidth={1.25}
               />
             ) : (
-              <circle cx={at.x} cy={at.y} r={radius} fill={fill} />
+              <circle cx={marker.x} cy={marker.y} r={MARKER_RADIUS} fill={fill} />
             )}
+
+            <rect
+              x={label.x}
+              y={label.y}
+              width={label.w}
+              height={label.h}
+              rx={3}
+              fill={fill}
+              stroke="#ffffff"
+              strokeWidth={1}
+            />
             <text
-              x={at.x}
-              y={at.y + 0.5}
-              fontSize={label.length > 2 ? 8.5 : 9}
+              x={label.x + label.w / 2}
+              y={label.y + label.h / 2 + 0.5}
+              fontSize={9}
               fill="#ffffff"
               fontWeight={600}
               textAnchor="middle"
               dominantBaseline="middle"
             >
-              {label}
+              {label.text}
             </text>
           </g>
         );
       })}
     </svg>
+  );
+}
+
+/** A thin line from a marker's edge to the near edge of its label chip. */
+function LeaderLine({ marker, label }: { marker: Point; label: Rect }) {
+  const labelCentre = { x: label.x + label.w / 2, y: label.y + label.h / 2 };
+  const start = pointOnCircleTowards(marker, labelCentre, MARKER_RADIUS);
+  const end = pointOnRectTowards(label, labelCentre, marker);
+  return (
+    <line
+      x1={start.x}
+      y1={start.y}
+      x2={end.x}
+      y2={end.y}
+      stroke="#9ca3af"
+      strokeWidth={1}
+    />
   );
 }
