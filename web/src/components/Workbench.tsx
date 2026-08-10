@@ -3,8 +3,10 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import DopPlot from "@/components/DopPlot";
 import SkyPlot from "@/components/SkyPlot";
 import SourceToggles from "@/components/SourceToggles";
+import TimeControls from "@/components/TimeControls";
 import {
   ARCHIVE_START,
   DEFAULT_ENABLED,
@@ -13,8 +15,16 @@ import {
   sbasPrnsFor,
   sourceByKey,
 } from "@/lib/coverage";
-import { dateOf, loadEphemeris, type EphemerisMeta } from "@/lib/ephemeris";
-import type { Observer, SkyView } from "@/lib/types";
+import { loadEphemerisRange, type EphemerisMeta } from "@/lib/ephemeris";
+import {
+  chooseStepSeconds,
+  inputToUnixSeconds,
+  unixSecondsToInput,
+  utcDaysSpanned,
+  validateInterval,
+} from "@/lib/interval";
+import { clampCursor, satellitesByEpoch, trackSegments } from "@/lib/trackLayout";
+import type { Observer, SkySeries } from "@/lib/types";
 import type { Skyplotter } from "@/lib/wasm";
 
 // Leaflet reaches for `window` during module evaluation, so the map cannot be
@@ -26,96 +36,136 @@ const MapPanel = dynamic(() => import("@/components/MapPanel"), {
 
 const DEFAULT_OBSERVER: Observer = { lat: 39.7392, lon: -104.9903, altM: 1609 };
 
-/** `datetime-local` wants `YYYY-MM-DDTHH:MM`; we treat the value as UTC. */
+/** Default window: six hours from midday on the most recent complete UTC day. */
+const DEFAULT_WINDOW_HOURS = 6;
+
 function toInputValue(date: Date): string {
   return date.toISOString().slice(0, 16);
 }
 
 /**
- * Default to midday on the most recent complete UTC day.
- *
- * Today's broadcast file only covers the hours already elapsed, so yesterday
- * avoids opening on an epoch the data cannot answer for.
+ * Yesterday, because today's broadcast file only covers the hours already
+ * elapsed — opening on it would show a window the data cannot answer for.
  */
-function defaultEpoch(): string {
+function defaultWindow(): { start: string; end: string } {
   const yesterday = new Date(Date.now() - 86_400_000);
-  return `${yesterday.toISOString().slice(0, 10)}T12:00`;
-}
-
-function isoToUnixSeconds(value: string): number {
-  return Date.parse(`${value}:00Z`) / 1000;
+  const day = yesterday.toISOString().slice(0, 10);
+  const startS = Date.parse(`${day}T12:00:00Z`) / 1000;
+  return {
+    start: unixSecondsToInput(startS),
+    end: unixSecondsToInput(startS + DEFAULT_WINDOW_HOURS * 3600),
+  };
 }
 
 export default function Workbench() {
   const [observer, setObserver] = useState<Observer>(DEFAULT_OBSERVER);
-  const [epoch, setEpoch] = useState(defaultEpoch);
+  const [{ start, end }, setWindow] = useState(defaultWindow);
   const [maskDeg, setMaskDeg] = useState(5);
   const [enabled, setEnabled] = useState<string[]>(DEFAULT_ENABLED);
+  const [cursor, setCursor] = useState(0);
 
   const [plotter, setPlotter] = useState<Skyplotter | null>(null);
-  const [meta, setMeta] = useState<EphemerisMeta | null>(null);
+  const [days, setDays] = useState<EphemerisMeta[]>([]);
+  const [loadMs, setLoadMs] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [computeError, setComputeError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [view, setView] = useState<SkyView | null>(null);
+  const [series, setSeries] = useState<SkySeries | null>(null);
 
-  const requestedDate = dateOf(epoch);
-  // The fetch depends on the day *and* on which records we need trimmed from
-  // it, so both participate in the effect key.
+  const startS = inputToUnixSeconds(start);
+  const endS = inputToUnixSeconds(end);
+  const problem = useMemo(() => validateInterval({ startS, endS }), [startS, endS]);
+  const stepS = useMemo(() => chooseStepSeconds(endS - startS), [startS, endS]);
+
+  // The fetch depends on which UTC days the window touches and on which records
+  // we need trimmed from them, so all three participate in the effect key.
+  const dayList = useMemo(
+    () => (problem ? [] : utcDaysSpanned({ startS, endS })),
+    [problem, startS, endS],
+  );
+  const dayKey = dayList.join(",");
   const rinexCodes = useMemo(() => rinexCodesFor(enabled).join(","), [enabled]);
   const sbasPrns = useMemo(() => sbasPrnsFor(enabled).join(","), [enabled]);
   const maxEpoch = useMemo(() => toInputValue(new Date()), []);
 
-  // Guards against a slow response for an old date overwriting a newer one.
+  // Guards against a slow response for an old window overwriting a newer one.
   const latestRequest = useRef(0);
 
-  // Refetch only when the UTC *day* changes — moving the clock within a day
-  // reuses the parsed ephemeris.
   useEffect(() => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) return;
+    if (dayList.length === 0) return;
 
     const token = ++latestRequest.current;
     setLoading(true);
     setLoadError(null);
 
-    loadEphemeris(requestedDate, rinexCodes, sbasPrns)
-      .then(({ plotter: instance, meta: info }) => {
+    loadEphemerisRange(dayList, rinexCodes, sbasPrns)
+      .then(({ plotter: instance, days: info, elapsedMs }) => {
         if (token !== latestRequest.current) return;
         setPlotter(instance);
-        setMeta(info);
+        setDays(info);
+        setLoadMs(elapsedMs);
       })
       .catch((cause: unknown) => {
         if (token !== latestRequest.current) return;
         setPlotter(null);
-        setMeta(null);
-        setView(null);
+        setDays([]);
+        setSeries(null);
         setLoadError(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => {
         if (token === latestRequest.current) setLoading(false);
       });
-  }, [requestedDate, rinexCodes, sbasPrns]);
+    // `dayKey` stands in for `dayList`, whose identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayKey, rinexCodes, sbasPrns]);
 
-  // Recompute whenever the observer, epoch or mask changes.
+  // Recompute the series whenever the observer, window, mask or sources change.
   useEffect(() => {
-    if (!plotter) return;
+    if (!plotter || problem) return;
     try {
-      const result = plotter.skyplot(
+      const result = plotter.skyplot_series(
         observer.lat,
         observer.lon,
         observer.altM,
-        isoToUnixSeconds(epoch),
+        startS,
+        endS,
+        stepS,
         maskDeg,
         enabled,
-      ) as SkyView;
-      setView(result);
+      ) as SkySeries;
+      setSeries(result);
       setComputeError(null);
     } catch (cause: unknown) {
-      setView(null);
+      setSeries(null);
       setComputeError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [plotter, observer, epoch, maskDeg, enabled]);
+  }, [plotter, observer, startS, endS, stepS, maskDeg, enabled, problem]);
+
+  // Everything below is derived once per series rather than per slider tick: a
+  // 24-hour window holds tens of thousands of samples, and re-deriving them on
+  // every drag would be felt.
+  const segments = useMemo(() => (series ? trackSegments(series) : []), [series]);
+  const byEpoch = useMemo(() => (series ? satellitesByEpoch(series) : []), [series]);
+
+  const epochCount = series?.epochs.length ?? 0;
+  const safeCursor = clampCursor(cursor, epochCount);
+  const satellites = byEpoch[safeCursor] ?? [];
+
+  // Keep the cursor proportionally where it was when the window is re-sampled,
+  // so nudging the end time does not throw the view back to the start.
+  const previousCount = useRef(epochCount);
+  useEffect(() => {
+    if (epochCount === 0 || previousCount.current === epochCount) {
+      previousCount.current = epochCount;
+      return;
+    }
+    setCursor((current) => {
+      const fraction = previousCount.current > 1 ? current / (previousCount.current - 1) : 0;
+      previousCount.current = epochCount;
+      return clampCursor(Math.round(fraction * (epochCount - 1)), epochCount);
+    });
+  }, [epochCount]);
 
   const onSelect = useCallback((lat: number, lon: number) => {
     // Altitude is not resolved from the map yet — a DEM lookup is phase 3.
@@ -128,15 +178,18 @@ export default function Workbench() {
     setNotice("Outside the supported region — phase 1 covers the continental US.");
   }, []);
 
-  const satellites = useMemo(() => view?.satellites ?? [], [view]);
   const error = loadError ?? computeError;
+  const anyPartial = days.some((day) => day.partial);
+  const showSbasWarning =
+    dayList.some(isBeforeSbasCoverage) &&
+    enabled.some((key) => sourceByKey(key)?.rinexCode === "S");
 
   return (
     <main style={styles.page}>
       <header style={styles.header}>
         <h1 style={styles.title}>GNSS sky plot</h1>
         <span style={styles.subtitle}>
-          GPS broadcast ephemeris · computed client-side in WASM
+          Broadcast ephemeris · computed client-side in WASM
         </span>
       </header>
 
@@ -164,69 +217,86 @@ export default function Workbench() {
             }
           />
 
-          <div style={styles.controls}>
-            <label style={styles.label}>
-              Epoch (UTC)
-              <input
-                type="datetime-local"
-                value={epoch}
-                min={`${ARCHIVE_START}T00:00`}
-                max={maxEpoch}
-                onChange={(event) => setEpoch(event.target.value)}
-                style={styles.input}
-              />
-            </label>
-            <label style={styles.label}>
-              Elevation mask: {maskDeg}&deg;
-              <input
-                type="range"
-                min={0}
-                max={30}
-                step={1}
-                value={maskDeg}
-                onChange={(event) => setMaskDeg(Number(event.target.value))}
-              />
-            </label>
-          </div>
+          <TimeControls
+            startValue={start}
+            endValue={end}
+            minValue={`${ARCHIVE_START}T00:00`}
+            maxValue={maxEpoch}
+            onStartChange={(value) => setWindow((w) => ({ ...w, start: value }))}
+            onEndChange={(value) => setWindow((w) => ({ ...w, end: value }))}
+            problem={problem}
+            epochs={series?.epochs ?? []}
+            stepS={stepS}
+            cursor={safeCursor}
+            onCursorChange={setCursor}
+            disabled={loading || !!error}
+          />
+
+          <label style={styles.label}>
+            Elevation mask: {maskDeg}&deg;
+            <input
+              type="range"
+              min={0}
+              max={30}
+              step={1}
+              value={maskDeg}
+              onChange={(event) => setMaskDeg(Number(event.target.value))}
+            />
+          </label>
 
           {enabled.length === 0 && (
             <p style={styles.warning}>
               Every source is switched off — turn one on to see satellites.
             </p>
           )}
-          {loading && enabled.length > 0 && (
-            <Placeholder>Fetching ephemeris for {requestedDate}…</Placeholder>
+          {loading && enabled.length > 0 && !problem && (
+            <Placeholder>
+              Fetching ephemeris for {dayList.join(" and ")}…
+            </Placeholder>
           )}
           {error && <p style={styles.error}>{error}</p>}
 
           {/* SBAS coverage in this archive starts much later than GNSS
               coverage, so an old date silently yields no SBAS satellites.
               Say so rather than leaving the user to wonder. */}
-          {!loading &&
-            !error &&
-            isBeforeSbasCoverage(requestedDate) &&
-            enabled.some((key) => sourceByKey(key)?.rinexCode === "S") && (
-              <p style={styles.warning}>
-                The broadcast archive carries no usable SBAS before{" "}
-                {"2025"} — SBAS sources will be empty at this epoch.
-              </p>
-            )}
+          {!loading && !error && showSbasWarning && (
+            <p style={styles.warning}>
+              The broadcast archive carries no usable SBAS before 2025 — SBAS
+              sources will be empty in this window.
+            </p>
+          )}
 
-          {meta?.partial && !loading && !error && (
+          {anyPartial && !loading && !error && (
             <p style={styles.warning}>
               Today&rsquo;s broadcast file is still accumulating — epochs later than
               the current hour will have no ephemeris.
             </p>
           )}
 
-          {view && !loading && (
+          {series && !loading && (
             <>
-              <SkyPlot satellites={satellites} elevationMaskDeg={maskDeg} />
+              <SkyPlot
+                satellites={satellites}
+                elevationMaskDeg={maskDeg}
+                tracks={segments}
+              />
+
+              <DopPlot series={series} cursor={safeCursor} onCursorChange={setCursor} />
+
               <dl style={styles.stats}>
-                <Stat label="Visible" value={view.visibleCount} />
-                <Stat label="Below mask" value={view.belowMask} />
-                <Stat label="No ephemeris" value={view.withoutEphemeris} />
+                <Stat label="Visible now" value={satellites.length} />
+                <Stat label="Tracks in window" value={series.tracks.length} />
+                <Stat label="Epochs" value={series.epochs.length} />
               </dl>
+
+              {series.epochsWithoutEphemeris > 0 && (
+                <p style={styles.warning}>
+                  {series.epochsWithoutEphemeris} of {series.epochs.length} epochs
+                  have no ephemeris — the window runs past the end of the
+                  broadcast file.
+                </p>
+              )}
+
               <table style={styles.table}>
                 <thead>
                   <tr>
@@ -255,11 +325,12 @@ export default function Workbench() {
           <p style={styles.footnote}>
             Receiver {observer.lat.toFixed(4)}&deg;, {observer.lon.toFixed(4)}&deg;,{" "}
             {observer.altM} m ellipsoidal
-            {meta && (
+            {days.length > 0 && (
               <>
                 <br />
-                {meta.source} · {meta.records} records ·{" "}
-                {meta.cached ? "cached" : "fetched"} in {meta.elapsedMs} ms
+                {days.map((day) => day.date).join(" + ")} ·{" "}
+                {days.reduce((total, day) => total + day.records, 0)} records ·{" "}
+                {days.every((day) => day.cached) ? "cached" : "fetched"} in {loadMs} ms
               </>
             )}
           </p>
@@ -308,9 +379,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   notice: { fontSize: 12, color: "#b45309", marginTop: 4 },
   plotColumn: { flex: "0 1 460px", minWidth: 320 },
-  controls: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 },
-  label: { display: "flex", flexDirection: "column", gap: 4, fontSize: 13 },
-  input: { padding: 4, fontSize: 13 },
+  label: { display: "flex", flexDirection: "column", gap: 4, fontSize: 13, marginBottom: 12 },
   stats: { display: "flex", gap: 24, margin: "12px 0" },
   statLabel: { fontSize: 11, color: "#6b7280", textTransform: "uppercase" },
   statValue: { fontSize: 18, margin: 0, fontVariantNumeric: "tabular-nums" },

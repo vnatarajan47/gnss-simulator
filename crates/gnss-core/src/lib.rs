@@ -32,14 +32,17 @@
 //! out of scope.
 
 pub mod constants;
+pub mod dop;
 pub mod ephemeris;
 pub mod geodesy;
 pub mod propagate;
 pub mod sbas;
+pub mod series;
 pub mod skyplot;
 pub mod source;
 pub mod time;
 
+pub use dop::{dop_for, dop_from_angles, Dop};
 pub use ephemeris::{
     BroadcastEphemeris, EphemerisSet, KeplerianEphemeris, SelectionConfig, SelectionStrategy, Sv,
 };
@@ -48,6 +51,7 @@ pub use geodesy::{
 };
 pub use propagate::PropagationConfig;
 pub use sbas::{SbasEphemeris, SbasProvider};
+pub use series::{skyplot_series, SatelliteTrack, SkySeries, TrackSample, MAX_EPOCHS};
 pub use skyplot::{skyplot, skyplot_from_set, SatelliteView, SkyView, SkyplotOptions};
 pub use source::parse_nav;
 pub use time::GpsTime;
@@ -94,4 +98,10 @@ pub enum Error {
 
     #[error("the RINEX parser panicked; the file is malformed or uses an unsupported layout")]
     ParserPanicked,
+
+    #[error("invalid time interval: {reason}")]
+    InvalidInterval { reason: &'static str },
+
+    #[error("interval would sample {epochs} epochs, above the limit of {max}; use a coarser step")]
+    SeriesTooLong { epochs: usize, max: usize },
 }

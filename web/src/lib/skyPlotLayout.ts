@@ -16,7 +16,7 @@
  * to need one.
  */
 
-import type { Satellite } from "@/lib/types";
+import type { Satellite } from "./types.ts";
 
 export const SIZE = 440;
 export const CENTRE = SIZE / 2;

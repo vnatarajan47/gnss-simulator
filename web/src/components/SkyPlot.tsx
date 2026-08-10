@@ -18,6 +18,7 @@ import {
   type Point,
   type Rect,
 } from "@/lib/skyPlotLayout";
+import { trackColour, type TrackSegment } from "@/lib/trackLayout";
 
 /**
  * Polar sky plot: azimuth is the angle (0 deg = north, clockwise), elevation
@@ -27,13 +28,19 @@ import {
  * trigonometry and the plot needs no axes, scales, or interaction. All the
  * geometry, including collision-avoiding label placement, lives in
  * `lib/skyPlotLayout.ts` so it can be tested without a DOM.
+ *
+ * `tracks` are the arcs swept over a time window. They are pre-segmented, so a
+ * satellite that sets and rises again arrives as two entries and is never drawn
+ * as one line across the sky -- see `lib/trackLayout.ts`.
  */
 export default function SkyPlot({
   satellites,
   elevationMaskDeg,
+  tracks = [],
 }: {
   satellites: Satellite[];
   elevationMaskDeg: number;
+  tracks?: TrackSegment[];
 }) {
   const maskRadius = RADIUS * (1 - elevationMaskDeg / 90);
   const placements = useMemo(() => layoutLabels(satellites), [satellites]);
@@ -105,6 +112,33 @@ export default function SkyPlot({
           </text>
         );
       })}
+
+      {/* Arcs beneath everything: they are context for the current positions,
+          which must stay the most legible thing on the plot. A single-sample
+          segment gets a dot -- a polyline of one point draws nothing, and
+          silently losing a satellite caught at the window edge would be worse
+          than a stray pixel. */}
+      {tracks.map((segment, index) =>
+        segment.points.length === 1 ? (
+          <circle
+            key={`${segment.sv}-${index}`}
+            cx={segment.points[0].x}
+            cy={segment.points[0].y}
+            r={1.25}
+            fill={trackColour(segment.sv)}
+          />
+        ) : (
+          <polyline
+            key={`${segment.sv}-${index}`}
+            points={segment.points.map((p) => `${p.x},${p.y}`).join(" ")}
+            fill="none"
+            stroke={trackColour(segment.sv)}
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ),
+      )}
 
       {/* Leader lines beneath everything else, so markers and label chips sit
           cleanly on top of their own connecting line. */}

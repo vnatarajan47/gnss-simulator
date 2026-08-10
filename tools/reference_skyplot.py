@@ -9,6 +9,9 @@ port of the Rust code. Where the Rust has a choice, this makes the other one:
   * Elevation:      asin(up / range) here, atan2(up, horizontal) there.
   * ENU:            explicit 3x3 rotation matrix here, inlined dot products
                     there.
+  * DOP:            explicit n-by-4 design matrix and an SVD pseudo-inverse
+                    here; the normal matrix accumulated in place and inverted
+                    by Gauss-Jordan there.
 
 Agreement between two implementations that share no code is meaningful
 evidence; agreement between a port and its original is not.
@@ -20,6 +23,9 @@ Sources:
 Usage:
     python3 tools/reference_skyplot.py --emit-vectors     # JSON test vectors
     python3 tools/reference_skyplot.py --report           # human-readable
+
+`--emit-vectors` needs numpy, for the SVD. Nothing else here does, and the
+generated JSON is checked in, so running the Rust test suite never needs it.
 """
 
 from __future__ import annotations
@@ -280,6 +286,57 @@ def compute(records, lat, lon, alt, iso, mask=5.0):
     return gps_s, out
 
 
+def dop(satellites):
+    """Dilution of precision from a list of computed satellite dicts.
+
+    Deliberately routed through the singular value decomposition rather than
+    through an explicit matrix inverse. For a full-rank A,
+
+        pinv(A) = (A^T A)^-1 A^T   =>   pinv(A) @ pinv(A).T = (A^T A)^-1 = Q
+
+    so this reaches the same Q by an orthogonal factorisation instead of by
+    forming the normal matrix and eliminating -- a different algorithm with
+    different conditioning, which is the point of a cross-check.
+
+    Returns None when the geometry admits no solution, matching the Rust.
+    """
+    import numpy as np
+
+    if len(satellites) < 4:
+        return None
+
+    rows = []
+    for s in satellites:
+        az = math.radians(s["azimuth"])
+        el = math.radians(s["elevation"])
+        # Unit vector from receiver to satellite, in east/north/up.
+        e = math.cos(el) * math.sin(az)
+        n = math.cos(el) * math.cos(az)
+        u = math.sin(el)
+        rows.append([-e, -n, -u, 1.0])
+
+    a = np.array(rows, dtype=float)
+
+    # Rank check off the singular values, not off a pivot threshold: a
+    # coplanar or coincident set is rank-deficient and has no solution.
+    sv = np.linalg.svd(a, compute_uv=False)
+    if sv[-1] <= sv[0] * 1e-12:
+        return None
+
+    pinv = np.linalg.pinv(a)
+    q = pinv @ pinv.T
+    east, north, up, time = (q[0][0], q[1][1], q[2][2], q[3][3])
+
+    return {
+        "gdop": math.sqrt(east + north + up + time),
+        "pdop": math.sqrt(east + north + up),
+        "hdop": math.sqrt(east + north),
+        "vdop": math.sqrt(up),
+        "tdop": math.sqrt(time),
+        "satellites": len(satellites),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--emit-vectors", action="store_true",
@@ -304,6 +361,14 @@ def main() -> int:
                 for s in sats:
                     print(f"G{s['prn']:02d} {s['azimuth']:9.4f} {s['elevation']:8.4f} "
                           f"{s['range_km']:11.3f} {s['ephemeris_age_s']:8.0f}")
+                d = dop(sats)
+                if d is None:
+                    print("\nno DOP solution (fewer than 4 satellites, "
+                          "or degenerate geometry)")
+                else:
+                    print(f"\nGDOP {d['gdop']:.4f}  PDOP {d['pdop']:.4f}  "
+                          f"HDOP {d['hdop']:.4f}  VDOP {d['vdop']:.4f}  "
+                          f"TDOP {d['tdop']:.4f}")
         return 0
 
     if args.emit_vectors:
@@ -319,6 +384,7 @@ def main() -> int:
                     "gps_seconds": gps_s,
                     "elevation_mask_deg": 5.0,
                     "satellites": sats,
+                    "dop": dop(sats),
                 })
         json.dump({"source": NAV_FILE.name, "cases": vectors}, sys.stdout, indent=1)
         return 0

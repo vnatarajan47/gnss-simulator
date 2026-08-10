@@ -28,23 +28,82 @@ export interface EphemerisMeta {
   elapsedMs: number;
 }
 
-export interface LoadedEphemeris {
+export interface LoadedRange {
   plotter: Skyplotter;
-  meta: EphemerisMeta;
+  /** One entry per UTC day loaded, in order. */
+  days: EphemerisMeta[];
+  /** Wall-clock milliseconds for the whole load. */
+  elapsedMs: number;
 }
 
-/** Extract the UTC date portion of a `datetime-local` value. */
-export function dateOf(isoLocal: string): string {
-  return isoLocal.slice(0, 10);
-}
-
-export async function loadEphemeris(
-  date: string,
+/**
+ * Fetch every UTC day a window touches and fold them into one engine.
+ *
+ * A time window can straddle UTC midnight while broadcast files are published
+ * one per day, so a series may need two of them. Merging is also strictly
+ * better than picking one near a boundary: an epoch at 00:10 has its nearest
+ * time-of-ephemeris in the *previous* day's file, so a single-day load would
+ * extrapolate forward from 00:00 where a merged one interpolates.
+ *
+ * Days are fetched in parallel but merged in order. Duplicate blocks across the
+ * midnight overlap are dropped inside `EphemerisSet`, so ordering only affects
+ * which identical copy is kept.
+ */
+export async function loadEphemerisRange(
+  dates: string[],
   constellations: string,
   sbasPrns = "",
-): Promise<LoadedEphemeris> {
-  const started = performance.now();
+): Promise<LoadedRange> {
+  if (dates.length === 0) {
+    throw new Error("no days requested");
+  }
 
+  const started = performance.now();
+  const loaded = await Promise.all(
+    dates.map((date) => fetchDay(date, constellations, sbasPrns)),
+  );
+
+  const [first, ...rest] = loaded;
+  const plotter = await createSkyplotter(first.bytes);
+  for (const day of rest) {
+    plotter.extend(day.bytes);
+  }
+
+  return {
+    plotter,
+    days: loaded.map((day) => day.meta),
+    elapsedMs: Math.round(performance.now() - started),
+  };
+}
+
+/** Fetch and validate one day's trimmed RINEX, without parsing it. */
+async function fetchDay(
+  date: string,
+  constellations: string,
+  sbasPrns: string,
+): Promise<{ bytes: Uint8Array; meta: EphemerisMeta }> {
+  const started = performance.now();
+  const response = await requestDay(date, constellations, sbasPrns);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+
+  return {
+    bytes,
+    meta: {
+      date,
+      source: response.headers.get("X-Ephemeris-Source") ?? "unknown",
+      records: Number(response.headers.get("X-Ephemeris-Records") ?? 0),
+      cached: response.headers.get("X-Ephemeris-Cached") === "true",
+      partial: response.headers.get("X-Ephemeris-Partial") === "true",
+      elapsedMs: Math.round(performance.now() - started),
+    },
+  };
+}
+
+async function requestDay(
+  date: string,
+  constellations: string,
+  sbasPrns: string,
+): Promise<Response> {
   // `v` participates in the cache key only: past-day responses are immutable,
   // so a change to the server-side trimming needs a new URL to reach clients.
   const response = await fetch(
@@ -63,21 +122,8 @@ export async function loadEphemeris(
     } catch {
       /* keep the status-derived message */
     }
-    throw new Error(message);
+    throw new Error(`${date}: ${message}`);
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const plotter = await createSkyplotter(bytes);
-
-  return {
-    plotter,
-    meta: {
-      date,
-      source: response.headers.get("X-Ephemeris-Source") ?? "unknown",
-      records: Number(response.headers.get("X-Ephemeris-Records") ?? 0),
-      cached: response.headers.get("X-Ephemeris-Cached") === "true",
-      partial: response.headers.get("X-Ephemeris-Partial") === "true",
-      elapsedMs: Math.round(performance.now() - started),
-    },
-  };
+  return response;
 }

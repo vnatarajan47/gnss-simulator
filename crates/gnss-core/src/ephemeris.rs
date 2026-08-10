@@ -301,6 +301,26 @@ impl EphemerisSet {
         });
     }
 
+    /// Absorb another set's blocks, dropping anything already held.
+    ///
+    /// Needed because a time window can span UTC midnight while broadcast
+    /// files are published one per day. Merging the two days is also strictly
+    /// better near a day boundary than using either file alone: an epoch at
+    /// 00:10 has its nearest ToE in the *previous* day's file, so a single-day
+    /// set would have to extrapolate forward from 00:00 where the merged set
+    /// can interpolate from a block centred on the epoch.
+    ///
+    /// Dedup and ordering come free from [`Self::insert`], which is why this is
+    /// a fold rather than a `BTreeMap` extend -- the overlap at midnight is
+    /// real and re-broadcast blocks must not accumulate.
+    pub fn merge(&mut self, other: EphemerisSet) {
+        for (_, blocks) in other.by_sv {
+            for block in blocks {
+                self.insert(block);
+            }
+        }
+    }
+
     /// Satellites present in this set.
     pub fn satellites(&self) -> impl Iterator<Item = Sv> + '_ {
         self.by_sv.keys().copied()
@@ -387,6 +407,43 @@ impl Constellation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Merging is how a window spanning UTC midnight gets both days' files.
+    /// Re-merging the same blocks must be a no-op: consecutive broadcast files
+    /// genuinely overlap, so this runs on every real two-day load.
+    #[test]
+    fn merging_is_idempotent_over_the_overlap() {
+        let mut a = EphemerisSet::new();
+        a.insert(stub(1, 7200.0, 10.0, 0));
+        a.insert(stub(1, 14400.0, 11.0, 0));
+        a.insert(stub(2, 7200.0, 20.0, 0));
+
+        let before = a.len();
+        let duplicate = a.clone();
+        a.merge(duplicate);
+        assert_eq!(a.len(), before, "re-merging identical blocks must not grow the set");
+    }
+
+    #[test]
+    fn merging_adds_only_genuinely_new_blocks() {
+        let mut day_one = EphemerisSet::new();
+        day_one.insert(stub(1, 79_200.0, 10.0, 0)); // 22:00
+        day_one.insert(stub(1, 86_400.0, 11.0, 0)); // 00:00, repeated next file
+
+        let mut day_two = EphemerisSet::new();
+        day_two.insert(stub(1, 86_400.0, 11.0, 0)); // the overlap
+        day_two.insert(stub(1, 93_600.0, 12.0, 0)); // 02:00
+
+        day_one.merge(day_two);
+
+        let blocks = day_one.blocks_for(Sv::new(Constellation::Gps, 1));
+        assert_eq!(blocks.len(), 3, "the shared 00:00 block must appear once");
+
+        // Ordering by ToE must survive the merge -- selection relies on it.
+        for pair in blocks.windows(2) {
+            assert!(pair[0].toe().seconds() < pair[1].toe().seconds());
+        }
+    }
 
     /// Unwrap the Keplerian variant, for tests that only build Keplerian stubs.
     fn keplerian_of(record: &BroadcastEphemeris) -> &KeplerianEphemeris {

@@ -3,6 +3,8 @@
 A phased GNSS signal simulator. Phase 1 (done): click any lat/lon in CONUS on
 a 2D map and see a live sky plot (az/el of visible satellites), computed
 client-side in WASM from RINEX Nav broadcast ephemeris fetched for any date.
+Phase 2 (done): pick a time *window*, see satellite tracks swept across it and
+HDOP/VDOP plotted against time, with one slider scrubbing both.
 
 Repo: https://github.com/vnatarajan47/gnss-simulator (branch `master`).
 
@@ -10,7 +12,7 @@ Repo: https://github.com/vnatarajan47/gnss-simulator (branch `master`).
 
 ```
 crates/gnss-core/   Rust: RINEX parsing, ephemeris propagation, az/el geometry
-crates/gnss-wasm/   wasm-bindgen wrapper exposing compute_skyplot()
+crates/gnss-wasm/   wasm-bindgen wrapper: compute_skyplot(), Skyplotter{skyplot,skyplot_series,extend}
 web/                Next.js (App Router, TypeScript), Leaflet map + SVG sky plot
 data/                cached RINEX Nav files (data/cache/ is a disk cache, gitignored-ish scratch)
 docs/adr/            architecture decision records (0001-0006)
@@ -80,6 +82,11 @@ No source is switched on in the UI (`web/src/lib/coverage.ts`, `SOURCES[]`,
   -- GEO look angles from a fixed lat/lon have an exact analytic solution, so
   this is a stronger check than another numerical implementation would be
   (`crates/gnss-core/tests/sbas_waas.rs`).
+- **DOP**: the same Python reference, but reaching `Q` by an SVD pseudo-inverse
+  where the Rust accumulates the normal matrix and eliminates -- a different
+  algorithm, not a transcription. Agreement is 4e-15 over 75 values, so the
+  test tolerance is set to 1e-12 to stay a real gate. Plus a four-satellite
+  tetrahedron solved by hand in `dop.rs` (Q = 2/3, 2/3, 4/3, 1/3).
 
 Only GPS and WAAS are `status: "supported"` today. Galileo/QZSS/BeiDou/other
 SBAS providers are wired up in the type system (`Constellation`,
@@ -111,6 +118,46 @@ Two rules that exist because of real bugs hit during development:
   file once `mtime > endOfDay` for the date it covers; otherwise it refetches
   even on a cache hit.
 
+### Time series and DOP (phase 2)
+
+`skyplot_series()` (`crates/gnss-core/src/series.rs`) samples the single-epoch
+path repeatedly rather than reimplementing it. That is deliberate: the UI shows
+a cursor and a table for the same instant, and two parallel implementations
+could drift apart. One implementation sampled repeatedly cannot.
+
+Series results are **sparse** — each satellite track carries only the epochs
+where it was above the mask, tagged with an `epoch_index`. A break in the run
+*is* a set/rise. A dense array with a "not visible" sentinel would let any
+consumer that forgot to check it draw a line straight across the sky between a
+set and the next rise; with indices the drawing code is forced to look.
+`segmentTrack` in `web/src/lib/trackLayout.ts` is the only place that decision
+is made, and it is tested directly.
+
+Every array in a series indexes the shared `epochs` axis. That is what makes
+the single slider synchronous *by construction*: the sky plot and the DOP chart
+are handed the same integer, never two independently-converted timestamps.
+
+DOP (`crates/gnss-core/src/dop.rs`) is `(AᵀA)⁻¹` over unit line-of-sight
+vectors, with **one clock column**. That is correct only while every satellite
+shares a time reference — true for GPS + SBAS (SBAS is GPS-time coherent by
+design), and false the moment Galileo or BeiDou are switched on. Each added
+system needs its own inter-system-bias column, which also raises the minimum
+satellite count by one. Make that change in `design_matrix`, not at call sites.
+
+Two rules the UI must not break:
+- Fewer than four satellites, or degenerate geometry, means **no solution** —
+  `None`, never zero. Zero on a precision chart reads as *perfect* precision at
+  exactly the moments there is no fix. `dopChart.ts` breaks the line instead.
+- The DOP axis autoscales rather than clipping. A spike marks the geometry
+  collapsing and is the most interesting thing the chart can show.
+
+Windows are capped at 24 h (`web/src/lib/interval.ts`), where two limits meet:
+a GPS ground track repeats every sidereal day, so longer mostly redraws itself,
+and a <=24 h window touches at most two daily broadcast files. Windows crossing
+UTC midnight load both days and `EphemerisSet::merge`s them — which is also
+strictly *better* than one file near a boundary, since an epoch at 00:10 has
+its nearest ToE in the previous day's file.
+
 ### Sky-plot label layout (`web/src/lib/skyPlotLayout.ts`)
 
 Pure geometry, no React/DOM, specifically so it's unit-testable
@@ -121,10 +168,9 @@ labels are placed by a greedy outward search (clear of every other marker and
 every already-placed label) with a leader line drawn when a label had to be
 displaced. Labels read `G05` / `S131` (constellation code + full PRN).
 
-This was built ahead of Phase 2 on purpose: a time-series/animated sky plot
-re-lays-out every frame, so the tests specifically cover determinism (same
-input → byte-identical layout, or labels would flicker between frames) and a
-denser-than-real-life 32-satellite case, not just today's actual sky.
+This was built ahead of Phase 2 on purpose, and paid off: the slider re-lays
+out labels on every tick, so the determinism test (same input → byte-identical
+layout) is what stops labels flickering as the cursor moves.
 
 ## Coverage limits (`web/src/lib/coverage.ts`)
 
@@ -143,7 +189,7 @@ denser-than-real-life 32-satellite case, not just today's actual sky.
 ```bash
 cargo test                    # gnss-core: unit tests + cross-check + WAAS geometry
 cd web && npm run build:wasm  # rebuild crates/gnss-wasm -> web/src/wasm/
-cd web && npm test            # skyPlotLayout tests (node --test)
+cd web && npm test            # pure-layout tests (node --test), 59 tests
 cd web && npm run typecheck   # tsc --noEmit
 cd web && npm run dev         # dev server, localhost:3000
 ```
@@ -152,8 +198,9 @@ cd web && npm run dev         # dev server, localhost:3000
 
 1. **Phase 1 -- done.** Static sky plot for any CONUS point/time, GPS +
    WAAS, client-side WASM propagation, collision-avoiding labels.
-2. **Phase 2 -- next.** Time-series / animated sky plot (satellite tracks
-   over an interval, not just one instant).
+2. **Phase 2 -- done.** Time-window selection (24 h cap), satellite tracks
+   with rise/set gaps, HDOP/VDOP against time, one slider scrubbing both
+   plots, multi-day ephemeris merging across UTC midnight.
 3. **Phase 3.** Terrain masking (local horizon obstruction, not just the
    elevation-angle mask).
 4. **Phase 4.** IQ signal generation.

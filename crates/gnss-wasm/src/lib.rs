@@ -9,8 +9,8 @@
 //! Build with `wasm-pack build --target web`.
 
 use gnss_core::{
-    skyplot_from_set, Constellation, EphemerisSet, Geodetic, GpsTime, SbasProvider, SkyView,
-    SkyplotOptions, Sv,
+    skyplot_from_set, skyplot_series, Constellation, Dop, EphemerisSet, Geodetic, GpsTime,
+    SbasProvider, SkySeries, SkyView, SkyplotOptions, Sv,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -83,6 +83,109 @@ impl From<SkyView> for JsSkyView {
             below_mask: view.below_mask,
             without_ephemeris: view.without_ephemeris,
             gps_seconds: view.time.seconds(),
+        }
+    }
+}
+
+/// Dilution of precision at one epoch, as handed to JavaScript.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsDop {
+    gdop: f64,
+    pdop: f64,
+    hdop: f64,
+    vdop: f64,
+    tdop: f64,
+    /// How many satellites entered the solution.
+    satellites: usize,
+}
+
+impl From<Dop> for JsDop {
+    fn from(d: Dop) -> Self {
+        Self {
+            gdop: d.gdop,
+            pdop: d.pdop,
+            hdop: d.hdop,
+            vdop: d.vdop,
+            tdop: d.tdop,
+            satellites: d.satellites,
+        }
+    }
+}
+
+/// One satellite at one sampled instant.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsTrackSample {
+    /// Index into `JsSkySeries::epochs`.
+    epoch_index: usize,
+    azimuth: f64,
+    elevation: f64,
+    range_km: f64,
+    /// Signed `t - ToE` of the ephemeris used [s].
+    ephemeris_age_s: f64,
+}
+
+/// One satellite's path across the window.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsTrack {
+    sv: String,
+    prn: u8,
+    source: String,
+    /// Ascending by `epochIndex`, with gaps where the satellite was not up.
+    /// A break in the run is a rise/set, and the renderer must not bridge it.
+    samples: Vec<JsTrackSample>,
+}
+
+/// A sky view sampled over an interval.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsSkySeries {
+    /// Unix seconds, ascending and evenly spaced. Every other array indexes
+    /// into this one, which is what keeps the sky plot and the DOP plot
+    /// synchronised without either having to know the step.
+    epochs: Vec<f64>,
+    tracks: Vec<JsTrack>,
+    /// Per epoch; `null` where the geometry admits no solution.
+    dop: Vec<Option<JsDop>>,
+    /// Satellites above the mask, per epoch.
+    visible: Vec<usize>,
+    /// Epochs where no satellite had a valid ephemeris.
+    epochs_without_ephemeris: usize,
+}
+
+impl From<SkySeries> for JsSkySeries {
+    fn from(series: SkySeries) -> Self {
+        Self {
+            epochs: series.epochs.iter().map(|t| t.to_unix_seconds()).collect(),
+            tracks: series
+                .tracks
+                .iter()
+                .map(|track| JsTrack {
+                    sv: track.sv.to_string(),
+                    prn: track.sv.prn,
+                    source: source_key(track.sv).to_string(),
+                    samples: track
+                        .samples
+                        .iter()
+                        .map(|s| JsTrackSample {
+                            epoch_index: s.epoch_index,
+                            azimuth: s.azimuth_deg,
+                            elevation: s.elevation_deg,
+                            range_km: s.range_m / 1000.0,
+                            ephemeris_age_s: s.ephemeris_age_s,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            dop: series
+                .dop
+                .iter()
+                .map(|d| d.map(JsDop::from))
+                .collect(),
+            visible: series.visible.clone(),
+            epochs_without_ephemeris: series.epochs_without_ephemeris,
         }
     }
 }
@@ -199,6 +302,18 @@ impl Skyplotter {
         Ok(Self { set })
     }
 
+    /// Absorb a second RINEX file into this one.
+    ///
+    /// Broadcast files are published one per UTC day, but a user-chosen window
+    /// can straddle midnight. Rather than making the caller juggle two plotters
+    /// and stitch the results, it loads each day and folds them into one set;
+    /// duplicate blocks across the overlap are dropped by `EphemerisSet`.
+    pub fn extend(&mut self, rinex_nav_data: &[u8]) -> Result<(), JsValue> {
+        let more = gnss_core::parse_nav(rinex_nav_data).map_err(to_js_error)?;
+        self.set.merge(more);
+        Ok(())
+    }
+
     /// Number of ephemeris blocks held.
     #[wasm_bindgen(getter)]
     pub fn block_count(&self) -> usize {
@@ -232,5 +347,38 @@ impl Skyplotter {
         .map_err(to_js_error)?;
 
         serde_wasm_bindgen::to_value(&JsSkyView::from(view)).map_err(to_js_error)
+    }
+
+    /// Sample the sky view across an interval.
+    ///
+    /// * `start_timestamp`, `end_timestamp` -- Unix seconds, inclusive.
+    /// * `step_s` -- sampling interval in seconds.
+    ///
+    /// Computing the whole series in one call rather than looping `skyplot` on
+    /// the JavaScript side is worth it twice over: it crosses the WASM boundary
+    /// once instead of hundreds of times, and it keeps the DOP solution beside
+    /// the geometry it is derived from.
+    pub fn skyplot_series(
+        &self,
+        lat: f64,
+        lon: f64,
+        alt: f64,
+        start_timestamp: f64,
+        end_timestamp: f64,
+        step_s: f64,
+        elevation_mask_deg: Option<f64>,
+        sources: Option<Vec<String>>,
+    ) -> Result<JsValue, JsValue> {
+        let series = skyplot_series(
+            &self.set,
+            Geodetic::new(lat, lon, alt),
+            GpsTime::from_unix_seconds(start_timestamp),
+            GpsTime::from_unix_seconds(end_timestamp),
+            step_s,
+            &options_for(elevation_mask_deg, sources),
+        )
+        .map_err(to_js_error)?;
+
+        serde_wasm_bindgen::to_value(&JsSkySeries::from(series)).map_err(to_js_error)
     }
 }

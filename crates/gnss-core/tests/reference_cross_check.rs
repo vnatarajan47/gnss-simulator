@@ -6,8 +6,13 @@
 //! algorithm with different code throughout: fixed-column RINEX parsing
 //! instead of the `rinex` crate, fixed-point Kepler iteration instead of
 //! Newton-Raphson, `asin` for elevation instead of `atan2`, and an explicit
-//! ENU rotation matrix. Two implementations that share no code agreeing to
+//! ENU rotation matrix. DOP goes through an explicit design matrix and an SVD
+//! pseudo-inverse there, against an in-place normal matrix and Gauss-Jordan
+//! elimination here. Two implementations that share no code agreeing to
 //! nanodegrees is real evidence; a port agreeing with its original is not.
+//!
+//! Regenerating needs numpy (for the SVD); running the tests does not, since
+//! the golden file is checked in.
 //!
 //! Regenerate with:
 //!     python3 tools/reference_skyplot.py --emit-vectors \
@@ -19,7 +24,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use gnss_core::{parse_nav, skyplot_from_set, Geodetic, GpsTime, SkyplotOptions};
+use gnss_core::{dop_for, parse_nav, skyplot_from_set, Geodetic, GpsTime, SkyplotOptions};
 use serde::Deserialize;
 
 /// Angular agreement required between the two implementations.
@@ -49,6 +54,18 @@ struct Case {
     gps_seconds: f64,
     elevation_mask_deg: f64,
     satellites: Vec<ReferenceSatellite>,
+    /// `null` where the reference found no solution.
+    dop: Option<ReferenceDop>,
+}
+
+#[derive(Deserialize)]
+struct ReferenceDop {
+    gdop: f64,
+    pdop: f64,
+    hdop: f64,
+    vdop: f64,
+    tdop: f64,
+    satellites: usize,
 }
 
 #[derive(Deserialize)]
@@ -180,6 +197,93 @@ fn matches_independent_python_reference() {
         "cross-checked {compared} satellites over {} cases; \
          worst az {worst_azimuth:.3e} deg, el {worst_elevation:.3e} deg, \
          range {worst_range:.3e} m",
+        vectors.cases.len()
+    );
+}
+
+/// DOP tolerance, dimensionless.
+///
+/// This compares the *end* of two independent chains: the reference derives
+/// its own az/el and inverts via SVD, we derive ours and eliminate on the
+/// normal matrix. Forming `AᵀA` squares the condition number, so some spread
+/// was expected — but the observed worst case over these vectors is 4e-15,
+/// essentially machine precision, because a real GPS sky is well conditioned.
+///
+/// Set just tight enough to stay a real gate. A looser bound would pass even
+/// if one side's inversion were meaningfully wrong, which would defeat the
+/// point of keeping a second implementation around.
+const DOP_TOLERANCE: f64 = 1e-12;
+
+/// Cross-check the DOP scalars against the SVD-based reference.
+///
+/// Worth its own test rather than folding into the geometry comparison: DOP is
+/// a different computation on top of the same angles, and a failure here with
+/// the geometry test passing localises the bug immediately to the inversion.
+#[test]
+fn dop_matches_independent_python_reference() {
+    let vectors = load_vectors();
+    let bytes = load_nav_bytes(&vectors.source);
+    let set = parse_nav(&bytes).expect("RINEX should parse");
+
+    let mut worst: f64 = 0.0;
+    let mut compared = 0usize;
+
+    for case in &vectors.cases {
+        let options = SkyplotOptions {
+            elevation_mask_deg: case.elevation_mask_deg,
+            ..SkyplotOptions::default()
+        };
+        let view = skyplot_from_set(
+            &set,
+            Geodetic::new(case.lat, case.lon, case.alt),
+            GpsTime::from_unix_seconds(case.unix_seconds),
+            &options,
+        )
+        .expect("sky view should compute");
+
+        let ours = dop_for(&view.satellites);
+
+        let (Some(ours), Some(expected)) = (ours, case.dop.as_ref()) else {
+            // Both must agree that there is no solution; one finding a fix
+            // where the other does not is itself a defect.
+            assert_eq!(
+                ours.is_none(),
+                case.dop.is_none(),
+                "{} @ {}: disagreement on whether a solution exists",
+                case.observer,
+                case.epoch_iso
+            );
+            continue;
+        };
+
+        assert_eq!(
+            ours.satellites, expected.satellites,
+            "{} @ {}: different satellite counts entered the solution",
+            case.observer, case.epoch_iso
+        );
+
+        for (name, a, b) in [
+            ("gdop", ours.gdop, expected.gdop),
+            ("pdop", ours.pdop, expected.pdop),
+            ("hdop", ours.hdop, expected.hdop),
+            ("vdop", ours.vdop, expected.vdop),
+            ("tdop", ours.tdop, expected.tdop),
+        ] {
+            let error = (a - b).abs();
+            assert!(
+                error < DOP_TOLERANCE,
+                "{} @ {}: {name} {a} vs {b} (delta {error:e})",
+                case.observer,
+                case.epoch_iso
+            );
+            worst = worst.max(error);
+            compared += 1;
+        }
+    }
+
+    assert!(compared > 0, "no DOP cases were compared");
+    eprintln!(
+        "cross-checked {compared} DOP values over {} cases; worst delta {worst:.3e}",
         vectors.cases.len()
     );
 }
