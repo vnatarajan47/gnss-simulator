@@ -83,9 +83,15 @@ fn waas_satellites_are_parsed() {
         assert_eq!(SbasProvider::from_prn(sv.prn), SbasProvider::Waas);
     }
 
-    // RINEX writes SBAS as PRN-100, so 131 -> "S31".
+    // Display shows the full PRN, matching how WAAS satellites are named
+    // everywhere else (and matching the sky-plot marker).
     let labels: Vec<String> = satellites.iter().map(Sv::to_string).collect();
-    assert_eq!(labels, vec!["S31", "S33", "S35"]);
+    assert_eq!(labels, vec!["S131", "S133", "S135"]);
+
+    // The RINEX on-disk encoding is still available, and is what the fixture
+    // file literally contains.
+    let rinex_ids: Vec<String> = satellites.iter().map(Sv::rinex_id).collect();
+    assert_eq!(rinex_ids, vec!["S31", "S33", "S35"]);
 }
 
 /// The headline check: computed look angles must match closed-form

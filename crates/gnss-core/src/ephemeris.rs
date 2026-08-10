@@ -22,17 +22,33 @@ impl Sv {
     }
 }
 
-impl fmt::Display for Sv {
-    /// RINEX 3 satellite identifier, e.g. `G01`, `E11`, `S31`.
+impl Sv {
+    /// Identifier exactly as written in a RINEX 3 file, e.g. `G01`, `S31`.
     ///
-    /// SBAS is the odd one out: RINEX writes the two-digit field as
-    /// `PRN - 100`, so PRN 131 appears as `S31`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// RINEX encodes SBAS satellites in a two-digit field as `PRN - 100`, so
+    /// PRN 131 is written `S31`. Use this only when producing or matching
+    /// RINEX text; for anything user-facing prefer [`Display`](fmt::Display),
+    /// which shows the full PRN.
+    pub fn rinex_id(&self) -> String {
         let code = self.constellation.rinex_code();
         match self.constellation {
-            Constellation::Sbas => write!(f, "{code}{:02}", self.prn.saturating_sub(100)),
-            _ => write!(f, "{code}{:02}", self.prn),
+            Constellation::Sbas => format!("{code}{:02}", self.prn.saturating_sub(100)),
+            _ => format!("{code}{:02}", self.prn),
         }
+    }
+}
+
+impl fmt::Display for Sv {
+    /// Human-facing satellite identifier: constellation code plus the *full*
+    /// PRN, e.g. `G01`, `E11`, `S131`.
+    ///
+    /// SBAS deliberately does not use the RINEX two-digit encoding here.
+    /// WAAS satellites are universally referred to by their true PRN (131,
+    /// 133, 135) in FAA and RTCA documentation, and showing `S31` alongside a
+    /// sky-plot marker reading `131` reads as a truncation bug. See
+    /// [`Sv::rinex_id`] for the on-disk form.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{:02}", self.constellation.rinex_code(), self.prn)
     }
 }
 
@@ -410,9 +426,22 @@ mod tests {
     }
 
     #[test]
-    fn sv_formats_as_rinex_identifier() {
+    fn sv_displays_the_full_prn() {
         assert_eq!(Sv::new(Constellation::Gps, 1).to_string(), "G01");
         assert_eq!(Sv::new(Constellation::Galileo, 11).to_string(), "E11");
+        // SBAS must not be truncated to the RINEX two-digit field: a label
+        // reading "S31" for PRN 131 looks like a display bug, and contradicts
+        // the PRN shown on the sky plot.
+        assert_eq!(Sv::new(Constellation::Sbas, 131).to_string(), "S131");
+        assert_eq!(Sv::new(Constellation::Sbas, 138).to_string(), "S138");
+    }
+
+    #[test]
+    fn rinex_id_keeps_the_on_disk_encoding() {
+        assert_eq!(Sv::new(Constellation::Gps, 1).rinex_id(), "G01");
+        // RINEX writes SBAS as PRN - 100.
+        assert_eq!(Sv::new(Constellation::Sbas, 131).rinex_id(), "S31");
+        assert_eq!(Sv::new(Constellation::Sbas, 120).rinex_id(), "S20");
     }
 
     #[test]
