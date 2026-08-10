@@ -12,7 +12,9 @@ use std::panic::AssertUnwindSafe;
 
 use rinex::prelude::{Constellation as RinexConstellation, Rinex};
 
-use crate::ephemeris::{BroadcastEphemeris, EphemerisSet, Sv};
+use crate::ephemeris::{EphemerisSet, KeplerianEphemeris, Sv};
+use crate::geodesy::Ecef;
+use crate::sbas::{self, SbasEphemeris};
 use crate::time::GpsTime;
 use crate::{Constellation, Error};
 
@@ -23,9 +25,9 @@ const BDT_EPOCH_GPS_WEEK: u32 = 1356;
 ///
 /// Accepts plain text or gzip-compressed input; the two are distinguished by
 /// magic bytes, so callers do not have to care which one they fetched.
-/// Satellites from constellations this crate cannot propagate (GLONASS, SBAS)
-/// are skipped rather than treated as an error, since mixed-constellation
-/// files are the norm.
+/// Satellites from constellations this crate cannot propagate (GLONASS) are
+/// skipped rather than treated as an error, since mixed-constellation files
+/// are the norm.
 pub fn parse_nav(bytes: &[u8]) -> Result<EphemerisSet, Error> {
     let decompressed;
     let payload: &[u8] = if is_gzip(bytes) {
@@ -57,8 +59,13 @@ pub fn parse_nav(bytes: &[u8]) -> Result<EphemerisSet, Error> {
         let Some(constellation) = map_constellation(key.sv.constellation) else {
             continue;
         };
-        let sv = Sv::new(constellation, key.sv.prn);
-        if let Some(eph) = lift_ephemeris(sv, frame) {
+        let sv = Sv::new(constellation, normalise_prn(constellation, key.sv.prn));
+
+        if constellation == Constellation::Sbas {
+            if let Some(eph) = lift_sbas(sv, key.epoch, frame) {
+                set.insert(eph);
+            }
+        } else if let Some(eph) = lift_ephemeris(sv, frame) {
             set.insert(eph);
         }
     }
@@ -80,15 +87,34 @@ fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Map the `rinex` crate's constellation enum onto ours.
 ///
-/// Returning `None` means "we cannot propagate this", which is the correct
-/// answer for GLONASS (state-vector ephemeris) and SBAS.
+/// Returning `None` means "we cannot propagate this". That is now true only of
+/// GLONASS, which broadcasts a state vector *and* requires numerical
+/// integration of the equations of motion, unlike SBAS.
 fn map_constellation(constellation: RinexConstellation) -> Option<Constellation> {
     match constellation {
         RinexConstellation::GPS => Some(Constellation::Gps),
         RinexConstellation::Galileo => Some(Constellation::Galileo),
         RinexConstellation::BeiDou => Some(Constellation::BeiDou),
         RinexConstellation::QZSS => Some(Constellation::Qzss),
+        other if other.is_sbas() => Some(Constellation::Sbas),
         _ => None,
+    }
+}
+
+/// Convert a parsed satellite number to a true PRN.
+///
+/// RINEX writes SBAS satellites as `S<PRN-100>`, so PRN 131 appears as `S31`,
+/// and the `rinex` crate surfaces that field verbatim as `prn = 31`. We store
+/// the real PRN internally, because that is what provider assignments
+/// ([`sbas::SbasProvider::from_prn`]) are published against. Formatting puts
+/// the two-digit form back for display.
+///
+/// The `< 100` guard makes this idempotent, so a source that already reports
+/// true PRNs is handled correctly too.
+fn normalise_prn(constellation: Constellation, prn: u8) -> u8 {
+    match constellation {
+        Constellation::Sbas if prn < 100 => prn.saturating_add(100),
+        _ => prn,
     }
 }
 
@@ -99,7 +125,9 @@ fn map_constellation(constellation: RinexConstellation) -> Option<Constellation>
 /// 2006-01-01, and BDT runs 14 s behind GPS time.
 fn to_gps_time(constellation: Constellation, week: u32, seconds_of_week: f64) -> GpsTime {
     match constellation {
-        Constellation::Gps | Constellation::Galileo | Constellation::Qzss => {
+        // SBAS never reaches here -- its records carry no week number and are
+        // timestamped from the record epoch instead (see `lift_sbas`).
+        Constellation::Gps | Constellation::Galileo | Constellation::Qzss | Constellation::Sbas => {
             GpsTime::from_week_and_sow(week, seconds_of_week)
         }
         Constellation::BeiDou => {
@@ -113,14 +141,14 @@ fn to_gps_time(constellation: Constellation, week: u32, seconds_of_week: f64) ->
 ///
 /// Returns `None` if any required field is missing, which happens for frame
 /// types that share the `Ephemeris` container but carry a different payload.
-fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<BroadcastEphemeris> {
+fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<KeplerianEphemeris> {
     let field = |name: &str| frame.get_orbit_f64(name);
 
     let week = field("week")? as u32;
     let toe_seconds_of_week = field("toe")?;
     let toe = to_gps_time(sv.constellation, week, toe_seconds_of_week);
 
-    Some(BroadcastEphemeris {
+    Some(KeplerianEphemeris {
         sv,
         toe,
         toe_seconds_of_week,
@@ -157,6 +185,55 @@ fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<Broadc
     })
 }
 
+/// Pull an SBAS state vector out of a parsed GEO navigation frame.
+///
+/// The RINEX field names below (`satPosX`, `velX`, `accelX`, ...) are the
+/// `rinex` crate's identifiers for the GEO message layout. Units are decided
+/// physically rather than trusted, because this product mixes kilometres and
+/// metres between providers -- see [`sbas::decode_scale`].
+///
+/// Returns `None` for records whose position is not a plausible geostationary
+/// radius under either interpretation, which discards the zero-filled
+/// placeholder frames that also appear in these files.
+fn lift_sbas(
+    sv: Sv,
+    epoch: rinex::prelude::Epoch,
+    frame: &rinex::navigation::Ephemeris,
+) -> Option<SbasEphemeris> {
+    let field = |name: &str| frame.get_orbit_f64(name);
+
+    let (px, py, pz) = (field("satPosX")?, field("satPosY")?, field("satPosZ")?);
+
+    // Rejects placeholders as well as deciding km vs m.
+    let scale = sbas::decode_scale(px, py, pz)?;
+
+    let (vx, vy, vz) = (
+        field("velX").unwrap_or(0.0),
+        field("velY").unwrap_or(0.0),
+        field("velZ").unwrap_or(0.0),
+    );
+    let (ax, ay, az) = (
+        field("accelX").unwrap_or(0.0),
+        field("accelY").unwrap_or(0.0),
+        field("accelZ").unwrap_or(0.0),
+    );
+
+    // SBAS has no week/ToE fields: the state vector's reference epoch is the
+    // record's own epoch, which the parser has already resolved.
+    let toe = GpsTime::from_seconds(epoch.to_gpst_seconds());
+
+    Some(SbasEphemeris {
+        sv,
+        toe,
+        position_m: Ecef::new(px * scale, py * scale, pz * scale),
+        velocity_m_s: Ecef::new(vx * scale, vy * scale, vz * scale),
+        acceleration_m_s2: Ecef::new(ax * scale, ay * scale, az * scale),
+        health: field("health").map_or(0, |h| h as u16),
+        accuracy_index: field("accuracy").unwrap_or(f64::NAN),
+        iodn: field("iodn").unwrap_or(f64::NAN),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +252,17 @@ mod tests {
         let t = to_gps_time(Constellation::Gps, 2347, 259_200.0);
         assert_eq!(t.week(), 2347);
         assert!((t.seconds_of_week() - 259_200.0).abs() < 1e-9);
+    }
+
+    /// RINEX writes SBAS as `S<PRN-100>`; we store the true PRN so provider
+    /// lookup works. Must be idempotent.
+    #[test]
+    fn sbas_prns_are_lifted_to_true_prns() {
+        assert_eq!(normalise_prn(Constellation::Sbas, 31), 131);
+        assert_eq!(normalise_prn(Constellation::Sbas, 35), 135);
+        assert_eq!(normalise_prn(Constellation::Sbas, 131), 131);
+        // Other constellations are untouched.
+        assert_eq!(normalise_prn(Constellation::Gps, 31), 31);
     }
 
     #[test]

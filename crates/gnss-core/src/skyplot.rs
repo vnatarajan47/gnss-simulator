@@ -3,7 +3,8 @@
 
 use crate::ephemeris::{EphemerisSet, SelectionConfig, Sv};
 use crate::geodesy::{geodetic_to_ecef, look_angles, Geodetic};
-use crate::propagate::{apparent_position, PropagationConfig};
+use crate::propagate::{apparent_position_any, PropagationConfig};
+use crate::sbas::SbasProvider;
 use crate::source::parse_nav;
 use crate::time::GpsTime;
 use crate::{Constellation, Error};
@@ -16,8 +17,17 @@ pub struct SkyplotOptions {
     /// 5 deg is the usual default for a survey-grade receiver: below that,
     /// multipath and tropospheric delay make observations unreliable.
     pub elevation_mask_deg: f64,
-    /// Constellations to include. Phase 1 ships GPS only.
+    /// Constellations to include.
+    ///
+    /// Include [`Constellation::Sbas`] to enable SBAS at all; which *operators*
+    /// are shown is then narrowed by [`Self::sbas_providers`].
     pub constellations: Vec<Constellation>,
+    /// SBAS operators to include, when SBAS is enabled.
+    ///
+    /// Separate from `constellations` because SBAS is one RINEX constellation
+    /// but many independent regional systems, and a receiver in CONUS has no
+    /// use for satellites parked over the Indian Ocean.
+    pub sbas_providers: Vec<SbasProvider>,
     pub selection: SelectionConfig,
     pub propagation: PropagationConfig,
 }
@@ -27,6 +37,7 @@ impl Default for SkyplotOptions {
         Self {
             elevation_mask_deg: 5.0,
             constellations: vec![Constellation::Gps],
+            sbas_providers: vec![SbasProvider::Waas],
             selection: SelectionConfig::default(),
             propagation: PropagationConfig::default(),
         }
@@ -97,13 +108,20 @@ pub fn skyplot_from_set(
         if !options.constellations.contains(&sv.constellation) {
             continue;
         }
+        if sv.constellation == Constellation::Sbas
+            && !options
+                .sbas_providers
+                .contains(&SbasProvider::from_prn(sv.prn))
+        {
+            continue;
+        }
 
         let Some(eph) = set.select(sv, t, options.selection) else {
             without_ephemeris += 1;
             continue;
         };
 
-        let position = apparent_position(eph, t, observer_ecef, &options.propagation)?;
+        let position = apparent_position_any(eph, t, observer_ecef, &options.propagation)?;
         let angles = look_angles(position, observer);
 
         if angles.elevation_deg < options.elevation_mask_deg {
@@ -117,7 +135,7 @@ pub fn skyplot_from_set(
             elevation_deg: angles.elevation_deg,
             range_m: angles.range_m,
             ephemeris_age_s: eph.age_at(t),
-            iode: eph.iode,
+            iode: eph.issue_of_data(),
         });
     }
 

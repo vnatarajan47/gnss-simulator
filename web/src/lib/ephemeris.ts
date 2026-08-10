@@ -41,6 +41,7 @@ export function dateOf(isoLocal: string): string {
 export async function loadEphemeris(
   date: string,
   constellations: string,
+  sbasPrns = "",
 ): Promise<LoadedEphemeris> {
   const started = performance.now();
 
@@ -49,7 +50,8 @@ export async function loadEphemeris(
   const response = await fetch(
     `/api/ephemeris?date=${encodeURIComponent(date)}` +
       `&constellations=${encodeURIComponent(constellations)}` +
-      `&v=${EPHEMERIS_FORMAT_VERSION}`,
+      `&v=${EPHEMERIS_FORMAT_VERSION}` +
+      (sbasPrns ? `&sbas=${encodeURIComponent(sbasPrns)}` : ""),
   );
 
   if (!response.ok) {

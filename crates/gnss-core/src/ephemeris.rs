@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::sbas::SbasEphemeris;
 use crate::time::GpsTime;
 use crate::Constellation;
 
@@ -22,9 +23,16 @@ impl Sv {
 }
 
 impl fmt::Display for Sv {
-    /// RINEX 3 satellite identifier, e.g. `G01`, `E11`.
+    /// RINEX 3 satellite identifier, e.g. `G01`, `E11`, `S31`.
+    ///
+    /// SBAS is the odd one out: RINEX writes the two-digit field as
+    /// `PRN - 100`, so PRN 131 appears as `S31`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{:02}", self.constellation.rinex_code(), self.prn)
+        let code = self.constellation.rinex_code();
+        match self.constellation {
+            Constellation::Sbas => write!(f, "{code}{:02}", self.prn.saturating_sub(100)),
+            _ => write!(f, "{code}{:02}", self.prn),
+        }
     }
 }
 
@@ -37,7 +45,7 @@ impl fmt::Display for Sv {
 /// Earth rotation rate, time-system offset) and are applied at propagation
 /// time, so adding a constellation does not require touching this type.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct BroadcastEphemeris {
+pub struct KeplerianEphemeris {
     /// Satellite this block describes.
     pub sv: Sv,
 
@@ -100,7 +108,7 @@ pub struct BroadcastEphemeris {
     pub health: u16,
 }
 
-impl BroadcastEphemeris {
+impl KeplerianEphemeris {
     /// Whether the transmitting satellite reported itself healthy.
     pub fn is_healthy(&self) -> bool {
         self.health == 0
@@ -114,6 +122,89 @@ impl BroadcastEphemeris {
     /// Semi-major axis \[m\].
     pub fn semi_major_axis(&self) -> f64 {
         self.sqrt_a * self.sqrt_a
+    }
+}
+
+/// One broadcast navigation record, in whichever form its constellation uses.
+///
+/// GPS, Galileo, BeiDou and QZSS transmit Keplerian elements; SBAS transmits
+/// an ECEF state vector. They share nothing numerically, so they are kept as
+/// distinct types and dispatched at propagation time rather than forced into
+/// one struct with half its fields unused.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BroadcastEphemeris {
+    Keplerian(KeplerianEphemeris),
+    Sbas(SbasEphemeris),
+}
+
+impl BroadcastEphemeris {
+    pub fn sv(&self) -> Sv {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.sv,
+            BroadcastEphemeris::Sbas(e) => e.sv,
+        }
+    }
+
+    /// Reference epoch of the record.
+    pub fn toe(&self) -> GpsTime {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.toe,
+            BroadcastEphemeris::Sbas(e) => e.toe,
+        }
+    }
+
+    /// Signed age relative to `t` \[s\].
+    pub fn age_at(&self, t: GpsTime) -> f64 {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.age_at(t),
+            BroadcastEphemeris::Sbas(e) => e.age_at(t),
+        }
+    }
+
+    /// Issue-of-data, used to tell successive uploads apart.
+    pub fn issue_of_data(&self) -> f64 {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.iode,
+            BroadcastEphemeris::Sbas(e) => e.iodn,
+        }
+    }
+
+    /// Raw health word, as broadcast.
+    pub fn health(&self) -> u16 {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.health,
+            BroadcastEphemeris::Sbas(e) => e.health,
+        }
+    }
+
+    /// Whether health filtering should be applied to this record at all.
+    ///
+    /// Only the Keplerian constellations carry a health word we trust. The
+    /// SBAS field in the merged IGS product is dominated by all-ones fillers
+    /// even for operational satellites, so gating on it would discard the
+    /// whole constellation -- see [`SbasEphemeris::health`].
+    pub fn health_is_meaningful(&self) -> bool {
+        matches!(self, BroadcastEphemeris::Keplerian(_))
+    }
+
+    /// Healthy, or health not meaningful for this record type.
+    pub fn is_usable(&self) -> bool {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.is_healthy(),
+            BroadcastEphemeris::Sbas(_) => true,
+        }
+    }
+}
+
+impl From<KeplerianEphemeris> for BroadcastEphemeris {
+    fn from(value: KeplerianEphemeris) -> Self {
+        BroadcastEphemeris::Keplerian(value)
+    }
+}
+
+impl From<SbasEphemeris> for BroadcastEphemeris {
+    fn from(value: SbasEphemeris) -> Self {
+        BroadcastEphemeris::Sbas(value)
     }
 }
 
@@ -170,22 +261,26 @@ impl EphemerisSet {
     /// discarding exact re-broadcasts.
     ///
     /// Duplicates are common: consecutive RINEX files overlap at midnight, and
-    /// a satellite repeats the same block for its whole two-hour window.
-    pub fn insert(&mut self, ephemeris: BroadcastEphemeris) {
-        let list = self.by_sv.entry(ephemeris.sv).or_default();
+    /// a satellite repeats the same block for its whole two-hour window. SBAS
+    /// is a stronger case again -- a daily file holds hundreds of state
+    /// vectors per satellite.
+    pub fn insert(&mut self, ephemeris: impl Into<BroadcastEphemeris>) {
+        let ephemeris = ephemeris.into();
+        let list = self.by_sv.entry(ephemeris.sv()).or_default();
 
-        let is_duplicate = list
-            .iter()
-            .any(|existing| existing.toe == ephemeris.toe && existing.iode == ephemeris.iode);
+        let is_duplicate = list.iter().any(|existing| {
+            existing.toe() == ephemeris.toe()
+                && existing.issue_of_data() == ephemeris.issue_of_data()
+        });
         if is_duplicate {
             return;
         }
 
         list.push(ephemeris);
         list.sort_by(|a, b| {
-            a.toe
+            a.toe()
                 .seconds()
-                .partial_cmp(&b.toe.seconds())
+                .partial_cmp(&b.toe().seconds())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
@@ -224,7 +319,9 @@ impl EphemerisSet {
             .unwrap_or_else(|| sv.constellation.fit_half_interval());
 
         let candidates = self.blocks_for(sv).iter().filter(|eph| {
-            if config.require_healthy && !eph.is_healthy() {
+            // Health filtering only applies where the health word means
+            // something; for SBAS `is_usable` is always true.
+            if config.require_healthy && !eph.is_usable() {
                 return false;
             }
             let age = eph.age_at(t);
@@ -236,22 +333,22 @@ impl EphemerisSet {
 
         match config.strategy {
             // Ties (a block re-issued with the same ToE) resolve to the later
-            // IODE, which is the more recent upload.
+            // issue of data, which is the more recent upload.
             SelectionStrategy::NearestToe => candidates.min_by(|a, b| {
                 a.age_at(t)
                     .abs()
                     .partial_cmp(&b.age_at(t).abs())
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then(
-                        a.iode
-                            .partial_cmp(&b.iode)
+                        a.issue_of_data()
+                            .partial_cmp(&b.issue_of_data())
                             .unwrap_or(std::cmp::Ordering::Equal),
                     )
             }),
             SelectionStrategy::LatestNotAfter => candidates.max_by(|a, b| {
-                a.toe
+                a.toe()
                     .seconds()
-                    .partial_cmp(&b.toe.seconds())
+                    .partial_cmp(&b.toe().seconds())
                     .unwrap_or(std::cmp::Ordering::Equal)
             }),
         }
@@ -266,6 +363,7 @@ impl Constellation {
             Constellation::Galileo => 'E',
             Constellation::BeiDou => 'C',
             Constellation::Qzss => 'J',
+            Constellation::Sbas => 'S',
         }
     }
 }
@@ -274,8 +372,16 @@ impl Constellation {
 mod tests {
     use super::*;
 
-    fn stub(prn: u8, toe_sow: f64, iode: f64, health: u16) -> BroadcastEphemeris {
-        BroadcastEphemeris {
+    /// Unwrap the Keplerian variant, for tests that only build Keplerian stubs.
+    fn keplerian_of(record: &BroadcastEphemeris) -> &KeplerianEphemeris {
+        match record {
+            BroadcastEphemeris::Keplerian(e) => e,
+            BroadcastEphemeris::Sbas(_) => panic!("expected a Keplerian record"),
+        }
+    }
+
+    fn stub(prn: u8, toe_sow: f64, iode: f64, health: u16) -> KeplerianEphemeris {
+        KeplerianEphemeris {
             sv: Sv::new(Constellation::Gps, prn),
             toe: GpsTime::from_week_and_sow(2347, toe_sow),
             toe_seconds_of_week: toe_sow,
@@ -331,6 +437,7 @@ mod tests {
         let toes: Vec<f64> = set
             .blocks_for(Sv::new(Constellation::Gps, 1))
             .iter()
+            .map(keplerian_of)
             .map(|e| e.toe_seconds_of_week)
             .collect();
         assert_eq!(toes, vec![7200.0, 14400.0, 21600.0]);
@@ -351,7 +458,7 @@ mod tests {
                 SelectionConfig::default(),
             )
             .expect("a block should be in range");
-        assert_eq!(chosen.toe_seconds_of_week, 14400.0);
+        assert_eq!(keplerian_of(chosen).toe_seconds_of_week, 14400.0);
     }
 
     #[test]
@@ -368,7 +475,7 @@ mod tests {
         let chosen = set
             .select(Sv::new(Constellation::Gps, 1), t, config)
             .expect("a block should be in range");
-        assert_eq!(chosen.toe_seconds_of_week, 7200.0);
+        assert_eq!(keplerian_of(chosen).toe_seconds_of_week, 7200.0);
     }
 
     #[test]
@@ -423,6 +530,6 @@ mod tests {
                 SelectionConfig::default(),
             )
             .expect("a block should be in range");
-        assert_eq!(chosen.iode, 2.0);
+        assert_eq!(keplerian_of(chosen).iode, 2.0);
     }
 }

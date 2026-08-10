@@ -8,7 +8,10 @@
 //!
 //! Build with `wasm-pack build --target web`.
 
-use gnss_core::{skyplot_from_set, EphemerisSet, Geodetic, GpsTime, SkyView, SkyplotOptions};
+use gnss_core::{
+    skyplot_from_set, Constellation, EphemerisSet, Geodetic, GpsTime, SbasProvider, SkyView,
+    SkyplotOptions, Sv,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -25,10 +28,16 @@ pub fn init() {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsSatellite {
-    /// RINEX identifier, e.g. `G07`.
+    /// RINEX identifier, e.g. `G07`, `S31`.
     sv: String,
-    /// PRN within the constellation.
+    /// PRN within the constellation. SBAS reports the true PRN (131), not the
+    /// two-digit RINEX form.
     prn: u8,
+    /// Which toggle this satellite belongs to: `GPS`, `WAAS`, `EGNOS`, ...
+    ///
+    /// Lets the UI group and colour by source without duplicating the PRN-to-
+    /// provider table on the JavaScript side.
+    source: String,
     /// Azimuth \[deg\], 0 = true north, clockwise.
     azimuth: f64,
     /// Elevation \[deg\] above the horizon.
@@ -63,6 +72,7 @@ impl From<SkyView> for JsSkyView {
                 .map(|s| JsSatellite {
                     sv: s.sv.to_string(),
                     prn: s.sv.prn,
+                    source: source_key(s.sv).to_string(),
                     azimuth: s.azimuth_deg,
                     elevation: s.elevation_deg,
                     range_km: s.range_m / 1000.0,
@@ -77,11 +87,59 @@ impl From<SkyView> for JsSkyView {
     }
 }
 
-fn options_for(elevation_mask_deg: Option<f64>) -> SkyplotOptions {
+/// The toggle a satellite belongs to.
+///
+/// For the Keplerian constellations this is just the constellation name; for
+/// SBAS it is the operator, since a receiver cares about WAAS versus EGNOS and
+/// not about the fact that both are "SBAS".
+fn source_key(sv: Sv) -> &'static str {
+    match sv.constellation {
+        Constellation::Gps => "GPS",
+        Constellation::Galileo => "GALILEO",
+        Constellation::BeiDou => "BEIDOU",
+        Constellation::Qzss => "QZSS",
+        Constellation::Sbas => SbasProvider::from_prn(sv.prn).key(),
+    }
+}
+
+/// Build options from a list of source keys.
+///
+/// `None` keeps the default (GPS only). An empty list is honoured literally --
+/// the caller has turned everything off and should get an empty sky, not a
+/// silent fallback to the default.
+fn options_for(elevation_mask_deg: Option<f64>, sources: Option<Vec<String>>) -> SkyplotOptions {
     let mut options = SkyplotOptions::default();
     if let Some(mask) = elevation_mask_deg {
         options.elevation_mask_deg = mask;
     }
+
+    if let Some(sources) = sources {
+        let mut constellations = Vec::new();
+        let mut providers = Vec::new();
+
+        for key in sources {
+            match key.to_ascii_uppercase().as_str() {
+                "GPS" => constellations.push(Constellation::Gps),
+                "GALILEO" => constellations.push(Constellation::Galileo),
+                "BEIDOU" => constellations.push(Constellation::BeiDou),
+                "QZSS" => constellations.push(Constellation::Qzss),
+                other => {
+                    if let Some(provider) = SbasProvider::from_key(other) {
+                        providers.push(provider);
+                        if !constellations.contains(&Constellation::Sbas) {
+                            constellations.push(Constellation::Sbas);
+                        }
+                    }
+                    // Unrecognised keys are ignored rather than erroring: the
+                    // UI may know about a source this build does not.
+                }
+            }
+        }
+
+        options.constellations = constellations;
+        options.sbas_providers = providers;
+    }
+
     options
 }
 
@@ -96,6 +154,8 @@ fn to_js_error(e: impl std::fmt::Display) -> JsValue {
 /// * `alt` -- observer height above the ellipsoid \[m\].
 /// * `timestamp` -- Unix time \[s\]. Pass `Date.now() / 1000`.
 /// * `elevation_mask_deg` -- omit satellites below this; defaults to 5.
+/// * `sources` -- which sources to include, e.g. `["GPS", "WAAS"]`. Omit for
+///   the default (GPS only); an empty array yields an empty sky.
 ///
 /// Re-parses the file on every call. For repeated queries use [`Skyplotter`].
 #[wasm_bindgen]
@@ -106,13 +166,14 @@ pub fn compute_skyplot(
     alt: f64,
     timestamp: f64,
     elevation_mask_deg: Option<f64>,
+    sources: Option<Vec<String>>,
 ) -> Result<JsValue, JsValue> {
     let set = gnss_core::parse_nav(rinex_nav_data).map_err(to_js_error)?;
     let view = skyplot_from_set(
         &set,
         Geodetic::new(lat, lon, alt),
         GpsTime::from_unix_seconds(timestamp),
-        &options_for(elevation_mask_deg),
+        &options_for(elevation_mask_deg, sources),
     )
     .map_err(to_js_error)?;
 
@@ -160,12 +221,13 @@ impl Skyplotter {
         alt: f64,
         timestamp: f64,
         elevation_mask_deg: Option<f64>,
+        sources: Option<Vec<String>>,
     ) -> Result<JsValue, JsValue> {
         let view = skyplot_from_set(
             &self.set,
             Geodetic::new(lat, lon, alt),
             GpsTime::from_unix_seconds(timestamp),
-            &options_for(elevation_mask_deg),
+            &options_for(elevation_mask_deg, sources),
         )
         .map_err(to_js_error)?;
 

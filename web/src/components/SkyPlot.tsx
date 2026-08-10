@@ -40,6 +40,14 @@ function elevationColour(elevationDeg: number): string {
   return `hsl(${hue} 72% 45%)`;
 }
 
+/**
+ * SBAS satellites are geostationary, which is worth showing: they never move,
+ * and they sit in a tight clump rather than sweeping across the sky.
+ */
+function isGeostationary(satellite: Satellite): boolean {
+  return satellite.sv.startsWith("S");
+}
+
 export default function SkyPlot({
   satellites,
   elevationMaskDeg,
@@ -119,24 +127,40 @@ export default function SkyPlot({
 
       {satellites.map((satellite) => {
         const at = project(satellite.azimuth, satellite.elevation);
+        const label = String(satellite.prn);
+        // SBAS PRNs are three digits and do not fit the default marker.
+        const radius = label.length > 2 ? 12 : 9;
+        const fill = elevationColour(satellite.elevation);
+
         return (
           <g key={satellite.sv}>
-            <circle
-              cx={at.x}
-              cy={at.y}
-              r={9}
-              fill={elevationColour(satellite.elevation)}
-            />
+            {/* Geostationary augmentation satellites get a square marker, so
+                they read as a different kind of thing at a glance rather than
+                only by PRN. */}
+            {isGeostationary(satellite) ? (
+              <rect
+                x={at.x - radius}
+                y={at.y - radius}
+                width={radius * 2}
+                height={radius * 2}
+                rx={3}
+                fill={fill}
+                stroke="#111827"
+                strokeWidth={1.5}
+              />
+            ) : (
+              <circle cx={at.x} cy={at.y} r={radius} fill={fill} />
+            )}
             <text
               x={at.x}
               y={at.y + 0.5}
-              fontSize={9}
+              fontSize={label.length > 2 ? 8.5 : 9}
               fill="#ffffff"
               fontWeight={600}
               textAnchor="middle"
               dominantBaseline="middle"
             >
-              {satellite.prn}
+              {label}
             </text>
           </g>
         );

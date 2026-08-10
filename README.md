@@ -2,8 +2,8 @@
 
 A GNSS signal simulator, built up in phases. Phase 1 is the geometry layer:
 click a point in the continental US, get a live sky plot of every visible GPS
-satellite — azimuth and elevation computed from RINEX broadcast ephemeris,
-entirely in the browser via WebAssembly.
+and WAAS satellite — azimuth and elevation computed from RINEX broadcast
+ephemeris, entirely in the browser via WebAssembly.
 
 The satellite geometry is validated to ~10⁻¹³ degrees against an independent
 reference implementation. Accuracy is the point; speed is not, yet.
@@ -50,11 +50,14 @@ cargo test
    IS-GPS-200 §20.3.3.4.3 — mean anomaly, Kepler's equation, true anomaly,
    argument of latitude with second-harmonic corrections, then rotation into
    the Earth-fixed frame. Signal transit time and the Sagnac term are applied.
-4. ECEF is transformed to topocentric ENU about the receiver and reduced to
+4. SBAS satellites take the other path: geostationary, so their broadcast state
+   vector is advanced to the epoch by Taylor expansion rather than solved as an
+   orbit.
+5. ECEF is transformed to topocentric ENU about the receiver and reduced to
    azimuth, elevation and range. Anything below the elevation mask (5° by
    default) is dropped.
-5. The frontend renders the survivors on a polar plot: azimuth as angle,
-   elevation as radius.
+6. The frontend renders the survivors on a polar plot: azimuth as angle,
+   elevation as radius. Geostationary satellites get a square marker.
 
 Unhealthy satellites are excluded by default. On the bundled 2025-01-01 file
 that means G01 and G22, which broadcast health word 63 all day.
@@ -71,6 +74,11 @@ instead of the `rinex` crate, fixed-point Kepler iteration instead of
 Newton-Raphson, `asin` for elevation instead of `atan2`, an explicit rotation
 matrix for ENU. `cargo test` compares the two across 5 CONUS sites × 3 epochs
 × ~10 satellites.
+
+SBAS gets a stronger check, in `crates/gnss-core/tests/sbas_waas.rs`: a
+geostationary satellite's look angles have a *closed form*, so the state-vector
+propagation is verified against analytic spherical geometry rather than against
+another program that could share a misconception.
 
 ```bash
 python3 tools/reference_skyplot.py --report          # human-readable sky view
@@ -100,10 +108,15 @@ distributes the same IGS product but requires an Earthdata login, and BKG does
 not. Files land in `data/cache/` (gitignored), so a repeated day is served
 locally in tens of milliseconds instead of ~5 s.
 
-Two edges worth knowing:
+Three edges worth knowing:
 
 - **Today's file is partial.** Broadcast files accumulate through the day, so
-  an epoch later than the current hour has no ephemeris. The UI says so.
+  an epoch later than the current hour has no ephemeris. The UI says so. A
+  partial file is never written to the cache as if complete: a cached copy is
+  only trusted when it was fetched *after* its day ended.
+- **SBAS coverage is much shallower than GNSS coverage.** Files before ~2021
+  carry no SBAS at all; from 2021 to late 2024 only EGNOS is present. WAAS
+  appears from early 2025. The UI warns when the epoch predates it.
 - `data/BRDC00WRD_R_20250010000_01D_GN.rnx` is still committed, but only as the
   fixture for `cargo test`. The app no longer reads it, so a cold cache with no
   network means no sky plot.
@@ -113,14 +126,43 @@ downloaded.
 
 ## Constellation support
 
-GPS today. Galileo, BeiDou and QZSS broadcast the same Keplerian parameter set,
-and `gnss-core` is parameterised over constellation — gravitational constant,
-Earth rotation rate, time-system offset — so enabling them is a matter of
-adding to `SkyplotOptions::constellations` and validating, not restructuring.
+Sources are toggled individually in the UI. Only validated ones can be switched
+on; the rest are shown greyed with the reason on hover.
 
-GLONASS is genuinely different: it broadcasts a position/velocity state vector
-requiring numerical integration rather than orbital elements. It would need its
-own propagator and is out of scope.
+| Source | State | Why |
+| --- | --- | --- |
+| **GPS** | on | Validated against an independent Python implementation. |
+| **WAAS** | on | Validated against closed-form geostationary geometry. |
+| EGNOS, MSAS | off | Propagated by the same SBAS code path, but unvalidated. |
+| Galileo, QZSS | off | Same Keplerian set as GPS; unvalidated. |
+| BeiDou | off | MEO/IGSO would work; its GEO satellites need a separate rotation. |
+| GLONASS | n/a | State vector needing numerical integration — a different propagator. |
+
+Two propagators exist. GPS/Galileo/BeiDou/QZSS use the Keplerian algorithm;
+SBAS satellites are geostationary and broadcast an ECEF **state vector**
+instead, propagated by second-order Taylor expansion (RINEX 3.05 §6.10). The
+split lives in `BroadcastEphemeris`, so adding a constellation means adding
+constants, not restructuring.
+
+SBAS is one RINEX constellation but many independent regional systems, so it is
+listed per operator — a receiver in CONUS has no use for a satellite parked over
+the Indian Ocean. Adding a provider is one entry in `web/src/lib/coverage.ts`
+plus one line in `SbasProvider::from_prn`.
+
+### Two things the broadcast data gets wrong
+
+Worth knowing before trusting SBAS output from any source:
+
+- **Units are inconsistent.** RINEX specifies kilometres for the GEO state
+  vector, but the merged IGS product mixes them — roughly half the records for
+  PRNs 121, 123, 127, 128, 136 and 144 are in metres. `sbas::decode_scale`
+  decides physically instead of trusting the file: exactly one interpretation
+  puts the satellite at a plausible geostationary radius. The same check
+  rejects the zero-filled placeholder records these files also contain.
+- **The health word is not populated.** It is dominated by all-ones fillers
+  (31, 63) even for operational satellites — every WAAS record carries 31.
+  Applying the GPS `health == 0` rule would silently discard all of SBAS, so
+  health is surfaced but not used for filtering.
 
 ## Architecture decisions
 

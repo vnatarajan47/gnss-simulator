@@ -35,29 +35,40 @@ pub mod constants;
 pub mod ephemeris;
 pub mod geodesy;
 pub mod propagate;
+pub mod sbas;
 pub mod skyplot;
 pub mod source;
 pub mod time;
 
-pub use ephemeris::{BroadcastEphemeris, EphemerisSet, SelectionConfig, SelectionStrategy, Sv};
+pub use ephemeris::{
+    BroadcastEphemeris, EphemerisSet, KeplerianEphemeris, SelectionConfig, SelectionStrategy, Sv,
+};
 pub use geodesy::{
     ecef_to_enu, ecef_to_geodetic, geodetic_to_ecef, look_angles, AzEl, Ecef, Enu, Geodetic,
 };
 pub use propagate::PropagationConfig;
+pub use sbas::{SbasEphemeris, SbasProvider};
 pub use skyplot::{skyplot, skyplot_from_set, SatelliteView, SkyView, SkyplotOptions};
 pub use source::parse_nav;
 pub use time::GpsTime;
 
-/// GNSS constellations whose broadcast ephemerides use Keplerian elements.
+/// GNSS constellations this crate can propagate.
 ///
-/// GLONASS and SBAS are intentionally absent: they broadcast state vectors
-/// rather than orbital elements and cannot share this code path.
+/// The first four broadcast Keplerian elements. SBAS is the exception: its
+/// geostationary satellites broadcast an ECEF state vector, propagated by
+/// Taylor expansion rather than an orbit solve (see [`sbas`]).
+///
+/// GLONASS is still absent. It also broadcasts a state vector, but one that
+/// requires numerical integration of the equations of motion including J2 --
+/// a different propagator again, not a variation on either of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Constellation {
     Gps,
     Galileo,
     BeiDou,
     Qzss,
+    /// Satellite-based augmentation: WAAS, EGNOS, MSAS, and friends.
+    Sbas,
 }
 
 /// Errors produced by this crate.

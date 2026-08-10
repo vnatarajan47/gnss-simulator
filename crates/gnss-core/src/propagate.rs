@@ -7,7 +7,7 @@
 //! against GPS specifically.
 
 use crate::constants::SPEED_OF_LIGHT;
-use crate::ephemeris::BroadcastEphemeris;
+use crate::ephemeris::{BroadcastEphemeris, KeplerianEphemeris, Sv};
 use crate::geodesy::Ecef;
 use crate::time::GpsTime;
 use crate::Error;
@@ -82,12 +82,14 @@ fn solve_eccentric_anomaly(
 /// correction applied. Use [`apparent_position`] for the position an observer
 /// actually sees.
 pub fn position_at(
-    ephemeris: &BroadcastEphemeris,
+    ephemeris: &KeplerianEphemeris,
     t: GpsTime,
     config: &PropagationConfig,
 ) -> Result<Ecef, Error> {
     let constellation = ephemeris.sv.constellation;
-    let mu = constellation.mu();
+    let mu = constellation.mu().ok_or(Error::InvalidEphemeris {
+        reason: "constellation has no Keplerian model",
+    })?;
     let earth_rate = constellation.earth_rotation_rate();
 
     let semi_major_axis = ephemeris.semi_major_axis();
@@ -154,17 +156,62 @@ pub fn position_at(
 /// Earth's rotation over the flight time so that transmitter and receiver are
 /// expressed in the same (reception-epoch) frame.
 pub fn apparent_position(
+    ephemeris: &KeplerianEphemeris,
+    reception_time: GpsTime,
+    observer_ecef: Ecef,
+    config: &PropagationConfig,
+) -> Result<Ecef, Error> {
+    apparent_position_of(
+        ephemeris.sv,
+        |t| position_at(ephemeris, t, config),
+        reception_time,
+        observer_ecef,
+        config,
+    )
+}
+
+/// Apparent position of any broadcast record, Keplerian or SBAS.
+///
+/// Dispatches on the record type; the light-time solution itself is identical
+/// either way, so it lives in [`apparent_position_of`].
+pub fn apparent_position_any(
     ephemeris: &BroadcastEphemeris,
     reception_time: GpsTime,
     observer_ecef: Ecef,
     config: &PropagationConfig,
 ) -> Result<Ecef, Error> {
-    let uncorrected = position_at(ephemeris, reception_time, config)?;
+    match ephemeris {
+        BroadcastEphemeris::Keplerian(e) => {
+            apparent_position(e, reception_time, observer_ecef, config)
+        }
+        BroadcastEphemeris::Sbas(e) => apparent_position_of(
+            e.sv,
+            |t| Ok(e.position_at(t)),
+            reception_time,
+            observer_ecef,
+            config,
+        ),
+    }
+}
+
+/// Solve the light-time equation for a satellite whose position at an instant
+/// is given by `position_at_time`.
+///
+/// Shared by both ephemeris kinds: the correction depends only on geometry and
+/// the Earth rotation rate, not on how the position was obtained.
+fn apparent_position_of(
+    sv: Sv,
+    position_at_time: impl Fn(GpsTime) -> Result<Ecef, Error>,
+    reception_time: GpsTime,
+    observer_ecef: Ecef,
+    config: &PropagationConfig,
+) -> Result<Ecef, Error> {
+    let uncorrected = position_at_time(reception_time)?;
     if !config.apply_transit_time_correction {
         return Ok(uncorrected);
     }
 
-    let earth_rate = ephemeris.sv.constellation.earth_rotation_rate();
+    let earth_rate = sv.constellation.earth_rotation_rate();
 
     // Two passes: the transit time converges to well under a nanosecond,
     // because the range changes by at most ~1 km over one iteration.
@@ -173,7 +220,7 @@ pub fn apparent_position(
 
     for _ in 0..2 {
         let transmit_time = reception_time.offset_by(-transit_time);
-        let at_transmit = position_at(ephemeris, transmit_time, config)?;
+        let at_transmit = position_at_time(transmit_time)?;
         // De-rotate into the reception-epoch ECEF frame (Sagnac correction).
         corrected = at_transmit.rotate_z(-earth_rate * transit_time);
         transit_time = (corrected - observer_ecef).norm() / SPEED_OF_LIGHT;
@@ -191,8 +238,8 @@ mod tests {
 
     /// A circular-orbit ephemeris with every perturbation zeroed, for which
     /// the answer is analytically known.
-    fn circular_ephemeris() -> BroadcastEphemeris {
-        BroadcastEphemeris {
+    fn circular_ephemeris() -> KeplerianEphemeris {
+        KeplerianEphemeris {
             sv: Sv::new(Constellation::Gps, 1),
             toe: GpsTime::from_week_and_sow(2347, 0.0),
             toe_seconds_of_week: 0.0,
@@ -278,7 +325,7 @@ mod tests {
             "semi-major axis {a} m is not a GPS orbit"
         );
 
-        let mu = Constellation::Gps.mu();
+        let mu = Constellation::Gps.mu().expect("GPS has a Keplerian model");
         let period = std::f64::consts::TAU * (a.powi(3) / mu).sqrt();
         assert!(
             (43_000.0..43_300.0).contains(&period),

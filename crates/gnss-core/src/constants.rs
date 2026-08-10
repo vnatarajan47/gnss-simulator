@@ -35,18 +35,28 @@ impl Constellation {
     /// GPS uses the older WGS-84 value (IS-GPS-200 Table 20-IV); Galileo and
     /// BeiDou use the newer one. Using the wrong one shifts the computed
     /// mean motion and is worth several metres of along-track error.
-    pub const fn mu(self) -> f64 {
+    ///
+    /// `None` for SBAS, which broadcasts an ECEF state vector rather than
+    /// orbital elements and so has no Keplerian model to evaluate.
+    pub const fn mu(self) -> Option<f64> {
         match self {
-            Constellation::Gps | Constellation::Qzss => 3.986_005e14,
-            Constellation::Galileo => 3.986_004_418e14,
-            Constellation::BeiDou => 3.986_004_418e14,
+            Constellation::Gps | Constellation::Qzss => Some(3.986_005e14),
+            Constellation::Galileo => Some(3.986_004_418e14),
+            Constellation::BeiDou => Some(3.986_004_418e14),
+            Constellation::Sbas => None,
         }
     }
 
     /// Earth rotation rate `OMEGA_e_dot` \[rad/s\].
+    ///
+    /// Defined for every constellation: even SBAS needs it, for the Earth
+    /// rotation over signal transit time.
     pub const fn earth_rotation_rate(self) -> f64 {
         match self {
-            Constellation::Gps | Constellation::Qzss | Constellation::Galileo => 7.292_115_146_7e-5,
+            Constellation::Gps
+            | Constellation::Qzss
+            | Constellation::Galileo
+            | Constellation::Sbas => 7.292_115_146_7e-5,
             Constellation::BeiDou => 7.292_115e-5,
         }
     }
@@ -54,11 +64,13 @@ impl Constellation {
     /// Relativistic clock-correction constant `F = -2*sqrt(mu)/c^2` \[s/sqrt(m)\].
     ///
     /// Unused for look angles, but part of the ephemeris contract and needed
-    /// once pseudoranges are generated (phase 4).
-    pub const fn relativistic_f(self) -> f64 {
+    /// once pseudoranges are generated (phase 4). `None` for SBAS, whose clock
+    /// correction is a plain polynomial with no eccentricity term.
+    pub const fn relativistic_f(self) -> Option<f64> {
         match self {
-            Constellation::Gps | Constellation::Qzss => -4.442_807_633e-10,
-            Constellation::Galileo | Constellation::BeiDou => -4.442_807_309e-10,
+            Constellation::Gps | Constellation::Qzss => Some(-4.442_807_633e-10),
+            Constellation::Galileo | Constellation::BeiDou => Some(-4.442_807_309e-10),
+            Constellation::Sbas => None,
         }
     }
 
@@ -70,7 +82,10 @@ impl Constellation {
     /// week count, so the offset is zero for our purposes.
     pub const fn seconds_to_gpst(self) -> f64 {
         match self {
-            Constellation::Gps | Constellation::Qzss | Constellation::Galileo => 0.0,
+            Constellation::Gps
+            | Constellation::Qzss
+            | Constellation::Galileo
+            | Constellation::Sbas => 0.0,
             Constellation::BeiDou => 14.0,
         }
     }
@@ -86,6 +101,11 @@ impl Constellation {
         match self {
             Constellation::Gps | Constellation::Qzss => 7200.0,
             Constellation::Galileo | Constellation::BeiDou => 7200.0,
+            // SBAS state vectors are published every ~4 minutes and are only
+            // meant for short extrapolation. 15 minutes tolerates a few missed
+            // messages; a geostationary satellite barely moves in ECEF over
+            // that span, so the cost of a slightly stale record is small.
+            Constellation::Sbas => 900.0,
         }
     }
 }

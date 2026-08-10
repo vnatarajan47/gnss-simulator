@@ -11,7 +11,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -28,7 +28,7 @@ const UPSTREAM_TIMEOUT_MS = 30_000;
 const CACHE_DIR = path.join(process.cwd(), "..", "data", "cache");
 
 /** RINEX 3 constellation codes this project can propagate. */
-const SUPPORTED_CODES = new Set(["G", "E", "C", "J"]);
+const SUPPORTED_CODES = new Set(["G", "E", "C", "J", "S"]);
 
 function dayOfYear(date: Date): number {
   const start = Date.UTC(date.getUTCFullYear(), 0, 1);
@@ -69,6 +69,7 @@ function todayUtc(): Date {
 function filterConstellations(
   text: string,
   keep: Set<string>,
+  sbasPrns: Set<number> | null,
 ): { body: string; records: number } {
   const lines = text.split("\n");
   const headerEnd = lines.findIndex((line) => line.includes("END OF HEADER"));
@@ -83,7 +84,7 @@ function filterConstellations(
     // Columns 41-60 carry the satellite system field.
     const label =
       keep.size === 1
-        ? { G: "G: GPS", E: "E: GALILEO", C: "C: BEIDOU", J: "J: QZSS" }[
+        ? { G: "G: GPS", E: "E: GALILEO", C: "C: BEIDOU", J: "J: QZSS", S: "S: SBAS" }[
             [...keep][0]
           ] ?? "M: MIXED"
         : "M: MIXED";
@@ -101,7 +102,18 @@ function filterConstellations(
     let end = i + 1;
     while (end < lines.length && !isRecordStart(lines[end])) end += 1;
 
-    if (keep.has(lines[i][0])) {
+    // SBAS is one RINEX constellation but many regional systems, and a full
+    // day carries ~12 800 records across all of them. Narrowing to the PRNs the
+    // caller asked for keeps the payload comparable to GPS. This is purely a
+    // size optimisation -- `gnss-core` filters by provider authoritatively, so
+    // an over-broad list here costs bytes, never correctness.
+    const isWanted =
+      keep.has(lines[i][0]) &&
+      (lines[i][0] !== "S" ||
+        sbasPrns === null ||
+        sbasPrns.has(Number(lines[i].slice(1, 3)) + 100));
+
+    if (isWanted) {
       // Trailing blank lines are not part of the record. Sweeping them in
       // produces zero-length lines in the output, which the `rinex` crate
       // panics on (parsing.rs slices [4..] without a length check) — and a
@@ -118,15 +130,29 @@ function filterConstellations(
   return { body: `${[...header, ...kept].join("\n")}\n`, records };
 }
 
-/** Fetch the upstream file, using a local disk cache. */
+/**
+ * Fetch the upstream file, using a local disk cache.
+ *
+ * A cached copy is only trusted if it was written *after* its day ended.
+ * Broadcast files accumulate through the day, so a file fetched at noon holds
+ * half a day of records and would otherwise be served as complete forever.
+ * The same rule handles today automatically: end-of-day is in the future, so
+ * today's file is never considered complete and is always refetched.
+ */
 async function fetchWithCache(
   date: Date,
 ): Promise<{ raw: Buffer; filename: string; cached: boolean }> {
   const { url, filename } = upstreamUrl(date);
   const cachePath = path.join(CACHE_DIR, filename);
+  const endOfDay = date.getTime() + 86_400_000;
 
   if (existsSync(cachePath)) {
-    return { raw: await readFile(cachePath), filename, cached: true };
+    const writtenAt = (await stat(cachePath)).mtimeMs;
+    if (writtenAt > endOfDay) {
+      return { raw: await readFile(cachePath), filename, cached: true };
+    }
+    // Partial: fetched while the day was still running. Fall through and
+    // refetch, overwriting it.
   }
 
   const controller = new AbortController();
@@ -161,6 +187,17 @@ export async function GET(request: Request) {
   // `v` is read only so that it forms part of the cache key -- see
   // EPHEMERIS_FORMAT_VERSION in lib/coverage.ts. Nothing branches on it.
   void params.get("v");
+
+  // Optional SBAS PRN narrowing. Absent means "keep every SBAS record".
+  const sbasParam = params.get("sbas");
+  const sbasPrns = sbasParam
+    ? new Set(
+        sbasParam
+          .split(",")
+          .map((value) => Number(value.trim()))
+          .filter((prn) => Number.isFinite(prn)),
+      )
+    : null;
 
   if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
     return Response.json(
@@ -210,11 +247,20 @@ export async function GET(request: Request) {
     const { body, records } = filterConstellations(
       gunzipSync(raw).toString("latin1"),
       keep,
+      sbasPrns,
     );
 
     if (records === 0) {
       return Response.json(
-        { error: `no ${[...keep].join(",")} records in ${filename}` },
+        {
+          error:
+            `no ${[...keep].join(",")} records in ${filename}` +
+            // SBAS coverage in this product is patchy historically: files
+            // before ~2021 carry none at all, and WAAS appears later still.
+            (keep.has("S")
+              ? " — SBAS coverage in the BKG archive is sparse before 2025"
+              : ""),
+        },
         { status: 404 },
       );
     }

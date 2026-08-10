@@ -3,9 +3,16 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import ConstellationStatus from "@/components/ConstellationStatus";
 import SkyPlot from "@/components/SkyPlot";
-import { ACTIVE_CONSTELLATION_CODES, ARCHIVE_START } from "@/lib/coverage";
+import SourceToggles from "@/components/SourceToggles";
+import {
+  ARCHIVE_START,
+  DEFAULT_ENABLED,
+  isBeforeSbasCoverage,
+  rinexCodesFor,
+  sbasPrnsFor,
+  sourceByKey,
+} from "@/lib/coverage";
 import { dateOf, loadEphemeris, type EphemerisMeta } from "@/lib/ephemeris";
 import type { Observer, SkyView } from "@/lib/types";
 import type { Skyplotter } from "@/lib/wasm";
@@ -43,6 +50,7 @@ export default function Workbench() {
   const [observer, setObserver] = useState<Observer>(DEFAULT_OBSERVER);
   const [epoch, setEpoch] = useState(defaultEpoch);
   const [maskDeg, setMaskDeg] = useState(5);
+  const [enabled, setEnabled] = useState<string[]>(DEFAULT_ENABLED);
 
   const [plotter, setPlotter] = useState<Skyplotter | null>(null);
   const [meta, setMeta] = useState<EphemerisMeta | null>(null);
@@ -53,6 +61,10 @@ export default function Workbench() {
   const [view, setView] = useState<SkyView | null>(null);
 
   const requestedDate = dateOf(epoch);
+  // The fetch depends on the day *and* on which records we need trimmed from
+  // it, so both participate in the effect key.
+  const rinexCodes = useMemo(() => rinexCodesFor(enabled).join(","), [enabled]);
+  const sbasPrns = useMemo(() => sbasPrnsFor(enabled).join(","), [enabled]);
   const maxEpoch = useMemo(() => toInputValue(new Date()), []);
 
   // Guards against a slow response for an old date overwriting a newer one.
@@ -67,7 +79,7 @@ export default function Workbench() {
     setLoading(true);
     setLoadError(null);
 
-    loadEphemeris(requestedDate, ACTIVE_CONSTELLATION_CODES)
+    loadEphemeris(requestedDate, rinexCodes, sbasPrns)
       .then(({ plotter: instance, meta: info }) => {
         if (token !== latestRequest.current) return;
         setPlotter(instance);
@@ -83,7 +95,7 @@ export default function Workbench() {
       .finally(() => {
         if (token === latestRequest.current) setLoading(false);
       });
-  }, [requestedDate]);
+  }, [requestedDate, rinexCodes, sbasPrns]);
 
   // Recompute whenever the observer, epoch or mask changes.
   useEffect(() => {
@@ -95,6 +107,7 @@ export default function Workbench() {
         observer.altM,
         isoToUnixSeconds(epoch),
         maskDeg,
+        enabled,
       ) as SkyView;
       setView(result);
       setComputeError(null);
@@ -102,7 +115,7 @@ export default function Workbench() {
       setView(null);
       setComputeError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [plotter, observer, epoch, maskDeg]);
+  }, [plotter, observer, epoch, maskDeg, enabled]);
 
   const onSelect = useCallback((lat: number, lon: number) => {
     // Altitude is not resolved from the map yet — a DEM lookup is phase 3.
@@ -140,7 +153,16 @@ export default function Workbench() {
         </section>
 
         <section style={styles.plotColumn}>
-          <ConstellationStatus />
+          <SourceToggles
+            enabled={enabled}
+            onToggle={(key) =>
+              setEnabled((previous) =>
+                previous.includes(key)
+                  ? previous.filter((k) => k !== key)
+                  : [...previous, key],
+              )
+            }
+          />
 
           <div style={styles.controls}>
             <label style={styles.label}>
@@ -167,8 +189,28 @@ export default function Workbench() {
             </label>
           </div>
 
-          {loading && <Placeholder>Fetching ephemeris for {requestedDate}…</Placeholder>}
+          {enabled.length === 0 && (
+            <p style={styles.warning}>
+              Every source is switched off — turn one on to see satellites.
+            </p>
+          )}
+          {loading && enabled.length > 0 && (
+            <Placeholder>Fetching ephemeris for {requestedDate}…</Placeholder>
+          )}
           {error && <p style={styles.error}>{error}</p>}
+
+          {/* SBAS coverage in this archive starts much later than GNSS
+              coverage, so an old date silently yields no SBAS satellites.
+              Say so rather than leaving the user to wonder. */}
+          {!loading &&
+            !error &&
+            isBeforeSbasCoverage(requestedDate) &&
+            enabled.some((key) => sourceByKey(key)?.rinexCode === "S") && (
+              <p style={styles.warning}>
+                The broadcast archive carries no usable SBAS before{" "}
+                {"2025"} — SBAS sources will be empty at this epoch.
+              </p>
+            )}
 
           {meta?.partial && !loading && !error && (
             <p style={styles.warning}>
@@ -189,6 +231,7 @@ export default function Workbench() {
                 <thead>
                   <tr>
                     <th style={styles.th}>SV</th>
+                    <th style={styles.th}>Source</th>
                     <th style={styles.thNum}>Az&deg;</th>
                     <th style={styles.thNum}>El&deg;</th>
                     <th style={styles.thNum}>Range km</th>
@@ -198,6 +241,7 @@ export default function Workbench() {
                   {satellites.map((satellite) => (
                     <tr key={satellite.sv}>
                       <td style={styles.td}>{satellite.sv}</td>
+                      <td style={styles.tdMuted}>{satellite.source}</td>
                       <td style={styles.tdNum}>{satellite.azimuth.toFixed(2)}</td>
                       <td style={styles.tdNum}>{satellite.elevation.toFixed(2)}</td>
                       <td style={styles.tdNum}>{satellite.rangeKm.toFixed(1)}</td>
@@ -279,6 +323,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid #f3f4f6",
     textAlign: "right",
     fontVariantNumeric: "tabular-nums",
+  },
+  tdMuted: {
+    padding: "3px 6px",
+    borderBottom: "1px solid #f3f4f6",
+    color: "#6b7280",
+    fontSize: 12,
   },
   placeholder: { color: "#6b7280", fontSize: 14 },
   warning: { color: "#b45309", fontSize: 12 },
