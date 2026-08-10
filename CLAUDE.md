@@ -151,6 +151,13 @@ Two rules the UI must not break:
 - The DOP axis autoscales rather than clipping. A spike marks the geometry
   collapsing and is the most interesting thing the chart can show.
 
+The WASM-to-TypeScript field names are a real contract with no compiler on
+either side of it -- a renamed Rust field becomes `undefined` in TS silently.
+`crates/gnss-wasm/src/lib.rs` tests assert the serialised key sets against what
+`web/src/lib/types.ts` declares. Series epochs cross as **Unix** seconds (the
+single-epoch view reports GPS seconds); that too is asserted, since confusing
+them shifts the axis by decades.
+
 Windows are capped at 24 h (`web/src/lib/interval.ts`), where two limits meet:
 a GPS ground track repeats every sidereal day, so longer mostly redraws itself,
 and a <=24 h window touches at most two daily broadcast files. Windows crossing
@@ -187,9 +194,9 @@ layout) is what stops labels flickering as the cursor moves.
 ## Build & test
 
 ```bash
-cargo test                    # gnss-core: unit tests + cross-check + WAAS geometry
+cargo test --workspace        # 84 tests: core math, cross-checks, WASM boundary
 cd web && npm run build:wasm  # rebuild crates/gnss-wasm -> web/src/wasm/
-cd web && npm test            # pure-layout tests (node --test), 59 tests
+cd web && npm test            # pure-layout tests (node --test), 70 tests
 cd web && npm run typecheck   # tsc --noEmit
 cd web && npm run dev         # dev server, localhost:3000
 ```

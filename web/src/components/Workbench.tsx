@@ -23,7 +23,12 @@ import {
   utcDaysSpanned,
   validateInterval,
 } from "@/lib/interval";
-import { clampCursor, satellitesByEpoch, trackSegments } from "@/lib/trackLayout";
+import {
+  clampCursor,
+  rescaleCursor,
+  satellitesByEpoch,
+  trackSegments,
+} from "@/lib/trackLayout";
 import type { Observer, SkySeries } from "@/lib/types";
 import type { Skyplotter } from "@/lib/wasm";
 
@@ -153,18 +158,17 @@ export default function Workbench() {
   const satellites = byEpoch[safeCursor] ?? [];
 
   // Keep the cursor proportionally where it was when the window is re-sampled,
-  // so nudging the end time does not throw the view back to the start.
+  // so nudging an end time does not throw the view back to the start. The
+  // arithmetic lives in `rescaleCursor`, where it is tested.
   const previousCount = useRef(epochCount);
   useEffect(() => {
     if (epochCount === 0 || previousCount.current === epochCount) {
       previousCount.current = epochCount;
       return;
     }
-    setCursor((current) => {
-      const fraction = previousCount.current > 1 ? current / (previousCount.current - 1) : 0;
-      previousCount.current = epochCount;
-      return clampCursor(Math.round(fraction * (epochCount - 1)), epochCount);
-    });
+    const before = previousCount.current;
+    previousCount.current = epochCount;
+    setCursor((current) => rescaleCursor(current, before, epochCount));
   }, [epochCount]);
 
   const onSelect = useCallback((lat: number, lon: number) => {

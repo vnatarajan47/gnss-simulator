@@ -358,6 +358,11 @@ impl Skyplotter {
     /// the JavaScript side is worth it twice over: it crosses the WASM boundary
     /// once instead of hundreds of times, and it keeps the DOP solution beside
     /// the geometry it is derived from.
+    // Nine parameters is past what clippy likes, but this is a wasm-bindgen
+    // boundary: JavaScript calls it positionally, and bundling the arguments
+    // into a struct would mean hand-writing the JS-side marshalling that
+    // `#[wasm_bindgen]` otherwise generates.
+    #[allow(clippy::too_many_arguments)]
     pub fn skyplot_series(
         &self,
         lat: f64,
@@ -380,5 +385,184 @@ impl Skyplotter {
         .map_err(to_js_error)?;
 
         serde_wasm_bindgen::to_value(&JsSkySeries::from(series)).map_err(to_js_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gnss_core::{parse_nav, skyplot_series, EphemerisSet};
+
+    /// Serialised field names, sorted.
+    ///
+    /// These are the contract with `web/src/lib/types.ts`. Renaming a Rust
+    /// field without renaming the TypeScript one produces `undefined` at
+    /// runtime with no compile error on either side, so the keys are asserted
+    /// rather than assumed.
+    ///
+    /// Sorted because JSON object key order carries no meaning and
+    /// `serde_json::Value` reorders anyway -- it is the *set* that matters.
+    fn keys(value: &serde_json::Value) -> Vec<String> {
+        let mut names: Vec<String> = value
+            .as_object()
+            .expect("object")
+            .keys()
+            .cloned()
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Sorted, so expectations can be written in declaration order.
+    fn sorted(names: &[&str]) -> Vec<String> {
+        let mut owned: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+        owned.sort();
+        owned
+    }
+
+    fn fixture() -> EphemerisSet {
+        let bytes = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../data/BRDC00WRD_R_20250010000_01D_GN.rnx"),
+        )
+        .expect("GPS fixture present");
+        parse_nav(&bytes).expect("fixture parses")
+    }
+
+    /// 2025-01-01T12:00Z, inside the fixture's day.
+    const START_UNIX: f64 = 1_735_732_800.0;
+
+    fn sample_series() -> JsSkySeries {
+        let start = GpsTime::from_unix_seconds(START_UNIX);
+        let series = skyplot_series(
+            &fixture(),
+            Geodetic::new(39.7392, -104.9903, 1609.0),
+            start,
+            GpsTime::from_seconds(start.seconds() + 3600.0),
+            600.0,
+            &SkyplotOptions::default(),
+        )
+        .expect("series computes");
+        JsSkySeries::from(series)
+    }
+
+    #[test]
+    fn series_serialises_the_field_names_typescript_expects() {
+        let json = serde_json::to_value(sample_series()).expect("serialises");
+
+        assert_eq!(
+            keys(&json),
+            sorted(&["epochs", "tracks", "dop", "visible", "epochsWithoutEphemeris"])
+        );
+
+        let track = &json["tracks"][0];
+        assert_eq!(keys(track), sorted(&["sv", "prn", "source", "samples"]));
+
+        let sample = &track["samples"][0];
+        assert_eq!(
+            keys(sample),
+            sorted(&["epochIndex", "azimuth", "elevation", "rangeKm", "ephemerisAgeS"])
+        );
+    }
+
+    #[test]
+    fn dop_serialises_the_field_names_typescript_expects() {
+        let json = serde_json::to_value(sample_series()).expect("serialises");
+        let dop = json["dop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| !entry.is_null())
+            .expect("a real GPS sky has a solution");
+
+        assert_eq!(
+            keys(dop),
+            sorted(&["gdop", "pdop", "hdop", "vdop", "tdop", "satellites"])
+        );
+    }
+
+    /// The single-epoch view reports GPS seconds, but a series axis has to be
+    /// Unix seconds -- JavaScript formats it directly as a clock time. Getting
+    /// these the wrong way round shifts the whole axis by the GPS-UTC offset
+    /// plus 45 years, so it is worth pinning down.
+    #[test]
+    fn series_epochs_are_unix_seconds_not_gps_seconds() {
+        let series = sample_series();
+        assert!((series.epochs[0] - START_UNIX).abs() < 1e-6);
+        assert!((series.epochs[1] - (START_UNIX + 600.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ranges_are_converted_to_kilometres() {
+        let series = sample_series();
+        let sample = &series.tracks[0].samples[0];
+        // A GPS satellite is 20 000-26 000 km away. In metres this would be
+        // seven orders out, which no plausible unit slip could imitate.
+        assert!(
+            (20_000.0..27_000.0).contains(&sample.range_km),
+            "range {} km is not a GPS range",
+            sample.range_km
+        );
+    }
+
+    #[test]
+    fn track_sample_indices_stay_within_the_epoch_axis() {
+        let series = sample_series();
+        for track in &series.tracks {
+            assert!(!track.samples.is_empty());
+            for sample in &track.samples {
+                assert!(
+                    sample.epoch_index < series.epochs.len(),
+                    "sample index {} outside {} epochs",
+                    sample.epoch_index,
+                    series.epochs.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn per_epoch_arrays_all_match_the_epoch_count() {
+        // The UI indexes `dop` and `visible` with the slider position, so a
+        // length mismatch would read as a missing solution rather than a bug.
+        let series = sample_series();
+        assert_eq!(series.dop.len(), series.epochs.len());
+        assert_eq!(series.visible.len(), series.epochs.len());
+    }
+
+    #[test]
+    fn source_keys_name_the_sbas_operator_not_the_constellation() {
+        // A receiver cares about WAAS versus EGNOS, not that both are "SBAS".
+        assert_eq!(source_key(Sv::new(Constellation::Gps, 5)), "GPS");
+        assert_eq!(source_key(Sv::new(Constellation::Sbas, 131)), "WAAS");
+        assert_eq!(source_key(Sv::new(Constellation::Sbas, 123)), "EGNOS");
+    }
+
+    #[test]
+    fn an_empty_source_list_is_honoured_literally() {
+        // The user has switched everything off; they should get an empty sky,
+        // not a silent fallback to the GPS default.
+        let options = options_for(None, Some(vec![]));
+        assert!(options.constellations.is_empty());
+
+        // Omitting the argument entirely is the one that keeps the default.
+        assert_eq!(
+            options_for(None, None).constellations,
+            SkyplotOptions::default().constellations
+        );
+    }
+
+    #[test]
+    fn unknown_source_keys_are_ignored_rather_than_fatal() {
+        // The UI may know about a source this build does not.
+        let options = options_for(None, Some(vec!["GPS".into(), "NOT_A_SYSTEM".into()]));
+        assert_eq!(options.constellations, vec![Constellation::Gps]);
+    }
+
+    #[test]
+    fn enabling_an_sbas_operator_also_enables_the_sbas_constellation() {
+        let options = options_for(None, Some(vec!["WAAS".into()]));
+        assert!(options.constellations.contains(&Constellation::Sbas));
+        assert_eq!(options.sbas_providers, vec![SbasProvider::Waas]);
     }
 }

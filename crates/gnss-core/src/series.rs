@@ -70,17 +70,6 @@ pub struct SatelliteTrack {
     pub samples: Vec<TrackSample>,
 }
 
-impl SatelliteTrack {
-    /// Fraction of the window this satellite was above the mask, in \[0, 1\].
-    pub fn visibility_fraction(&self, epochs: usize) -> f64 {
-        if epochs == 0 {
-            0.0
-        } else {
-            self.samples.len() as f64 / epochs as f64
-        }
-    }
-}
-
 /// A sky view sampled across an interval.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkySeries {
@@ -323,6 +312,117 @@ mod tests {
         assert!(
             saw_a_gap || series.tracks.iter().any(|t| t.samples.len() < series.epochs.len()),
             "expected at least one satellite not visible for the whole window"
+        );
+    }
+
+    /// A GPS satellite orbits in just under twelve hours, so across a full day
+    /// at least one must set and rise again -- producing a genuine *interior*
+    /// gap, not merely a track that starts late or ends early.
+    ///
+    /// This is the case that makes sparse indexing necessary: a consumer that
+    /// ignored the gap would draw a line across the sky between the set and the
+    /// next rise, through positions the satellite never occupied.
+    #[test]
+    fn a_full_day_produces_a_real_set_and_rise() {
+        let start = fixture_start();
+        let series = skyplot_series(
+            &fixture(),
+            denver(),
+            start,
+            GpsTime::from_seconds(start.seconds() + 24.0 * 3600.0),
+            300.0,
+            &SkyplotOptions::default(),
+        )
+        .expect("series computes");
+
+        let with_interior_gaps: Vec<_> = series
+            .tracks
+            .iter()
+            .filter(|track| {
+                track
+                    .samples
+                    .windows(2)
+                    .any(|pair| pair[1].epoch_index > pair[0].epoch_index + 1)
+            })
+            .map(|track| track.sv)
+            .collect();
+
+        assert!(
+            !with_interior_gaps.is_empty(),
+            "expected at least one satellite to set and rise again over 24 h"
+        );
+
+        // And the gap must be substantial, not a one-sample flicker at the mask
+        // boundary: a GPS satellite is below the horizon for hours.
+        let longest = series
+            .tracks
+            .iter()
+            .flat_map(|track| {
+                track
+                    .samples
+                    .windows(2)
+                    .map(|pair| pair[1].epoch_index - pair[0].epoch_index - 1)
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(
+            longest > 12,
+            "longest gap was {longest} samples (~{} min); expected hours",
+            longest * 5
+        );
+    }
+
+    /// Geostationary satellites are the opposite case: they never set, so a
+    /// WAAS track must be unbroken and its position must barely move.
+    #[test]
+    fn geostationary_tracks_are_continuous_and_nearly_still() {
+        let bytes = std::fs::read("../../data/WAAS_20262201100_02H_SN.rnx")
+            .expect("WAAS fixture present");
+        let set = parse_nav(&bytes).expect("fixture parses");
+
+        let start = GpsTime::from_unix_seconds(EPOCH_UNIX);
+        let options = SkyplotOptions {
+            elevation_mask_deg: 0.0,
+            constellations: vec![crate::Constellation::Sbas],
+            sbas_providers: vec![crate::sbas::SbasProvider::Waas],
+            ..SkyplotOptions::default()
+        };
+
+        let series = skyplot_series(
+            &set,
+            denver(),
+            start,
+            GpsTime::from_seconds(start.seconds() + 1800.0),
+            60.0,
+            &options,
+        )
+        .expect("series computes");
+
+        assert!(!series.tracks.is_empty(), "expected WAAS satellites");
+
+        for track in &series.tracks {
+            assert_eq!(
+                track.samples.len(),
+                series.epochs.len(),
+                "{} is geostationary and must be visible at every epoch",
+                track.sv
+            );
+
+            let azimuths: Vec<f64> = track.samples.iter().map(|s| s.azimuth_deg).collect();
+            let spread = azimuths.iter().cloned().fold(f64::MIN, f64::max)
+                - azimuths.iter().cloned().fold(f64::MAX, f64::min);
+            assert!(
+                spread < 0.5,
+                "{} moved {spread} deg in azimuth over 30 min; GEOs should not",
+                track.sv
+            );
+        }
+
+        // Three near-coplanar GEOs cannot fix a position, so every epoch must
+        // report no solution rather than a large-but-plausible DOP.
+        assert!(
+            series.dop.iter().all(Option::is_none),
+            "three geostationary satellites must not yield a position solution"
         );
     }
 

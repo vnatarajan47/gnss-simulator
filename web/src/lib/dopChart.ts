@@ -87,6 +87,26 @@ export function yForValue(value: number, yMax: number): number {
 }
 
 /**
+ * Inverse of {@link xForEpoch}: which epoch a click landed on.
+ *
+ * Lives here rather than in the component so the round trip against the
+ * forward mapping is testable. Getting these two out of step would put the
+ * cursor somewhere other than where the user clicked — a small error that is
+ * very hard to notice, because the cursor still lands *somewhere* plausible.
+ *
+ * `viewBoxX` is in SVG user units, not client pixels; the caller rescales,
+ * since only it knows the rendered size.
+ */
+export function epochAtViewBoxX(viewBoxX: number, epochCount: number): number {
+  if (epochCount <= 1) return 0;
+  const fraction = (viewBoxX - MARGIN.left) / PLOT_WIDTH;
+  const index = Math.round(fraction * (epochCount - 1));
+  // Clicks in the margins are legitimate — clamp to the ends rather than
+  // ignoring them, so dragging off the edge still tracks.
+  return Math.min(Math.max(index, 0), epochCount - 1);
+}
+
+/**
  * Round an axis maximum up to something a human would have chosen.
  *
  * Walks 1/2/5 x 10^n so the axis lands on 3, 5, 10, 20, 50 rather than on

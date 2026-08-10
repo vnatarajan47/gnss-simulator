@@ -8,7 +8,9 @@ import {
   PLOT_HEIGHT,
   WIDTH,
   dopChartLayout,
+  epochAtViewBoxX,
   xForEpoch,
+  yForValue,
 } from "@/lib/dopChart";
 import { formatClock } from "@/lib/interval";
 import type { SkySeries } from "@/lib/types";
@@ -42,11 +44,10 @@ export default function DopPlot({
     if (!onCursorChange || epochCount <= 1) return;
     const box = event.currentTarget.getBoundingClientRect();
     // The SVG scales to its container, so map client pixels back to viewBox
-    // units before inverting the axis.
+    // units first. The axis inversion itself lives in `dopChart` beside the
+    // forward mapping, where the round trip is tested.
     const viewBoxX = ((event.clientX - box.left) / box.width) * WIDTH;
-    const fraction = (viewBoxX - MARGIN.left) / (WIDTH - MARGIN.left - MARGIN.right);
-    const index = Math.round(fraction * (epochCount - 1));
-    onCursorChange(Math.min(Math.max(index, 0), epochCount - 1));
+    onCursorChange(epochAtViewBoxX(viewBoxX, epochCount));
   };
 
   return (
@@ -90,7 +91,7 @@ export default function DopPlot({
         />
 
         {layout.yTicks.map((value) => {
-          const y = MARGIN.top + PLOT_HEIGHT * (1 - value / layout.yMax);
+          const y = yForValue(value, layout.yMax);
           return (
             <g key={value}>
               <line
@@ -159,9 +160,7 @@ export default function DopPlot({
             plot's moving markers, driven by the same index. */}
         {atCursor &&
           layout.series.map((entry) => {
-            const y =
-              MARGIN.top +
-              PLOT_HEIGHT * (1 - Math.min(atCursor[entry.key], layout.yMax) / layout.yMax);
+            const y = yForValue(atCursor[entry.key], layout.yMax);
             return (
               <circle
                 key={entry.key}

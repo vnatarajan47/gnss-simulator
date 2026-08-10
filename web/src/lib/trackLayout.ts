@@ -136,3 +136,25 @@ export function clampCursor(cursor: number, epochCount: number): number {
   if (epochCount <= 0) return 0;
   return Math.min(Math.max(Math.round(cursor), 0), epochCount - 1);
 }
+
+/**
+ * Move a cursor to the same *relative* position after the window is re-sampled.
+ *
+ * Changing the window length changes the sample step, and therefore the number
+ * of epochs. Keeping the raw index would jump the view somewhere arbitrary
+ * (index 400 of 721 is the middle; index 400 of 481 is near the end), and
+ * resetting to zero would throw away where the user was looking every time they
+ * nudged an end time. Preserving the fraction keeps the displayed instant
+ * roughly put, which is what someone adjusting a window expects.
+ */
+export function rescaleCursor(
+  cursor: number,
+  previousCount: number,
+  nextCount: number,
+): number {
+  if (nextCount <= 0) return 0;
+  if (previousCount <= 1) return clampCursor(cursor, nextCount);
+
+  const fraction = cursor / (previousCount - 1);
+  return clampCursor(Math.round(fraction * (nextCount - 1)), nextCount);
+}

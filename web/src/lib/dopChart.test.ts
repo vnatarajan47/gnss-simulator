@@ -16,6 +16,7 @@ import {
   PLOT_HEIGHT,
   WIDTH,
   dopChartLayout,
+  epochAtViewBoxX,
   xForEpoch,
   yForValue,
 } from "./dopChart.ts";
@@ -48,6 +49,45 @@ describe("scales", () => {
 
   it("survives a single-epoch series", () => {
     assert.equal(xForEpoch(0, 1), MARGIN.left);
+  });
+});
+
+describe("click-to-cursor inversion", () => {
+  it("round-trips against the forward mapping at every epoch", () => {
+    // The two must stay exact inverses. If they drift the cursor lands
+    // somewhere other than where the user clicked — an error that is easy to
+    // ship, because the cursor still goes *somewhere* plausible.
+    for (const epochCount of [2, 7, 100, 481, 721]) {
+      for (let i = 0; i < epochCount; i += 1) {
+        assert.equal(
+          epochAtViewBoxX(xForEpoch(i, epochCount), epochCount),
+          i,
+          `epoch ${i} of ${epochCount} did not round-trip`,
+        );
+      }
+    }
+  });
+
+  it("clamps clicks in the margins to the ends", () => {
+    // Clicking the axis label area, or dragging off the edge, should track to
+    // the nearest end rather than being ignored.
+    assert.equal(epochAtViewBoxX(0, 100), 0);
+    assert.equal(epochAtViewBoxX(-50, 100), 0);
+    assert.equal(epochAtViewBoxX(WIDTH, 100), 99);
+    assert.equal(epochAtViewBoxX(WIDTH + 50, 100), 99);
+  });
+
+  it("picks the nearest epoch for a click between samples", () => {
+    // Halfway between epoch 0 and 1 of 11 rounds to one of them, never past.
+    const midpoint = (xForEpoch(0, 11) + xForEpoch(1, 11)) / 2;
+    assert.ok([0, 1].includes(epochAtViewBoxX(midpoint, 11)));
+    // Just past epoch 3's position must resolve to 3.
+    assert.equal(epochAtViewBoxX(xForEpoch(3, 11) + 0.5, 11), 3);
+  });
+
+  it("survives a degenerate series", () => {
+    assert.equal(epochAtViewBoxX(200, 1), 0);
+    assert.equal(epochAtViewBoxX(200, 0), 0);
   });
 });
 

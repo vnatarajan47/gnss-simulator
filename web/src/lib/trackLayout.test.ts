@@ -12,6 +12,7 @@ import { describe, it } from "node:test";
 
 import {
   clampCursor,
+  rescaleCursor,
   satellitesByEpoch,
   segmentTrack,
   trackColour,
@@ -188,5 +189,97 @@ describe("clampCursor", () => {
 
   it("survives an empty series", () => {
     assert.equal(clampCursor(3, 0), 0);
+  });
+});
+
+describe("rescaleCursor", () => {
+  it("holds the ends fixed", () => {
+    // Whatever else changes, "start of window" and "end of window" must stay
+    // put when the sample step changes underneath.
+    assert.equal(rescaleCursor(0, 721, 481), 0);
+    assert.equal(rescaleCursor(720, 721, 481), 480);
+  });
+
+  it("keeps the middle in the middle", () => {
+    // The failure this prevents: keeping the raw index. 360 of 721 is the
+    // midpoint; 360 of 481 is three-quarters of the way along.
+    assert.equal(rescaleCursor(360, 721, 481), 240);
+    assert.equal(rescaleCursor(240, 481, 721), 360);
+  });
+
+  it("round-trips a resample back and forth", () => {
+    // Nudging a window's end and undoing it should land where it started,
+    // give or take the rounding a coarser grid forces.
+    for (const cursor of [0, 90, 180, 360, 540, 720]) {
+      const there = rescaleCursor(cursor, 721, 481);
+      const back = rescaleCursor(there, 481, 721);
+      assert.ok(
+        Math.abs(back - cursor) <= 1,
+        `${cursor} -> ${there} -> ${back} drifted more than one epoch`,
+      );
+    }
+  });
+
+  it("never leaves the valid range", () => {
+    for (const [cursor, before, after] of [
+      [720, 721, 2],
+      [0, 1, 500],
+      [-10, 100, 50],
+      [9999, 100, 50],
+    ] as const) {
+      const result = rescaleCursor(cursor, before, after);
+      assert.ok(result >= 0 && result < after, `${result} outside 0..${after - 1}`);
+    }
+  });
+
+  it("survives a series that had or has no epochs", () => {
+    assert.equal(rescaleCursor(5, 0, 10), 5);
+    assert.equal(rescaleCursor(5, 1, 10), 5);
+    assert.equal(rescaleCursor(5, 10, 0), 0);
+  });
+});
+
+describe("plot synchronisation", () => {
+  /**
+   * The property the whole design rests on: one cursor index drives both
+   * plots. Asserted structurally rather than by driving a browser — the sky
+   * plot's satellites and the DOP chart's value at index `i` must come from
+   * the same epoch, so they can never show different instants.
+   */
+  it("reads the same epoch for the sky plot and the DOP chart", () => {
+    const epochCount = 12;
+    const built = series([track("G01", [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])], epochCount);
+    // Give each epoch a distinguishable DOP so a misalignment is visible.
+    built.dop = built.epochs.map((_, i) => ({
+      gdop: 2,
+      pdop: 1.8,
+      hdop: 1 + i / 100,
+      vdop: 1.4,
+      tdop: 0.9,
+      satellites: 4,
+    }));
+
+    const byEpoch = satellitesByEpoch(built);
+
+    for (let cursor = 0; cursor < epochCount; cursor += 1) {
+      const skySample = byEpoch[cursor][0];
+      const dopSample = built.dop[cursor];
+      const trackSample = built.tracks[0].samples[cursor];
+
+      assert.equal(trackSample.epochIndex, cursor);
+      assert.equal(skySample.azimuth, trackSample.azimuth);
+      // Same index into the same epoch array on both sides.
+      assert.equal(dopSample?.hdop, 1 + cursor / 100);
+    }
+  });
+
+  it("keeps the cursor pointing at a real epoch after a resample", () => {
+    // The two guards used together in Workbench: rescale, then clamp.
+    const next = 481;
+    for (const cursor of [0, 1, 359, 360, 720]) {
+      const moved = clampCursor(rescaleCursor(cursor, 721, next), next);
+      assert.ok(Number.isInteger(moved));
+      assert.ok(moved >= 0 && moved < next);
+    }
   });
 });
