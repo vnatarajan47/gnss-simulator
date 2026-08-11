@@ -345,6 +345,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gnss-iq"
+version = "0.1.0"
+dependencies = [
+ "gnss-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "gnss-rs"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/gnss-core", "crates/gnss-wasm"]
+members = ["crates/gnss-core", "crates/gnss-iq", "crates/gnss-wasm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 gnss-core = { path = "crates/gnss-core" }
+gnss-iq = { path = "crates/gnss-iq" }
 
 # Small code size matters: this workspace ships to the browser as wasm.
 #
