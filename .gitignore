@@ -17,6 +17,10 @@ node_modules
 # Ephemeris fetched on demand by /api/ephemeris and cached on disk
 /data/cache
 
+# IQ job records and their outputs. Generated artefacts, and the binaries run
+# to hundreds of megabytes each.
+/data/jobs
+
 # Python
 __pycache__/
 *.pyc

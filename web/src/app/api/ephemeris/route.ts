@@ -11,47 +11,14 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import { gunzipSync } from "node:zlib";
+
+import { ARCHIVE_START, fetchWithCache, todayUtc } from "@/lib/ephemerisCache";
 
 export const runtime = "nodejs";
 
-/** Earliest day present in the BKG BRDC archive (probed empirically). */
-const ARCHIVE_START = "2017-06-01";
-
-/** Upstream fetch budget. The archive is usually fast; a slow day should fail
- *  visibly rather than hang the UI. */
-const UPSTREAM_TIMEOUT_MS = 30_000;
-
-const CACHE_DIR = path.join(process.cwd(), "..", "data", "cache");
-
 /** RINEX 3 constellation codes this project can propagate. */
 const SUPPORTED_CODES = new Set(["G", "E", "C", "J", "S"]);
-
-function dayOfYear(date: Date): number {
-  const start = Date.UTC(date.getUTCFullYear(), 0, 1);
-  return Math.floor((date.getTime() - start) / 86_400_000) + 1;
-}
-
-function upstreamUrl(date: Date): { url: string; filename: string } {
-  const year = date.getUTCFullYear();
-  const doy = String(dayOfYear(date)).padStart(3, "0");
-  const filename = `BRDC00WRD_R_${year}${doy}0000_01D_MN.rnx.gz`;
-  return {
-    url: `https://igs.bkg.bund.de/root_ftp/IGS/BRDC/${year}/${doy}/${filename}`,
-    filename,
-  };
-}
-
-/** Today in UTC, at midnight. */
-function todayUtc(): Date {
-  const now = new Date();
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
-}
 
 /**
  * Split a RINEX 3 navigation file and keep only the requested constellations.
@@ -128,56 +95,6 @@ function filterConstellations(
 
   // Exactly one trailing newline, no interior blanks.
   return { body: `${[...header, ...kept].join("\n")}\n`, records };
-}
-
-/**
- * Fetch the upstream file, using a local disk cache.
- *
- * A cached copy is only trusted if it was written *after* its day ended.
- * Broadcast files accumulate through the day, so a file fetched at noon holds
- * half a day of records and would otherwise be served as complete forever.
- * The same rule handles today automatically: end-of-day is in the future, so
- * today's file is never considered complete and is always refetched.
- */
-async function fetchWithCache(
-  date: Date,
-): Promise<{ raw: Buffer; filename: string; cached: boolean }> {
-  const { url, filename } = upstreamUrl(date);
-  const cachePath = path.join(CACHE_DIR, filename);
-  const endOfDay = date.getTime() + 86_400_000;
-
-  if (existsSync(cachePath)) {
-    const writtenAt = (await stat(cachePath)).mtimeMs;
-    if (writtenAt > endOfDay) {
-      return { raw: await readFile(cachePath), filename, cached: true };
-    }
-    // Partial: fetched while the day was still running. Fall through and
-    // refetch, overwriting it.
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    const error = new Error(
-      `upstream returned ${response.status} for ${filename}`,
-    ) as Error & { status?: number };
-    error.status = response.status === 404 ? 404 : 502;
-    throw error;
-  }
-
-  const raw = Buffer.from(await response.arrayBuffer());
-
-  await mkdir(CACHE_DIR, { recursive: true });
-  await writeFile(cachePath, raw);
-
-  return { raw, filename, cached: false };
 }
 
 export async function GET(request: Request) {

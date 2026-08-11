@@ -8,13 +8,18 @@ ephemeris, entirely in the browser via WebAssembly.
 The satellite geometry is validated to ~10⁻¹³ degrees against an independent
 reference implementation. Accuracy is the point; speed is not, yet.
 
+Phase 4 adds the signal layer: submit a job and get back a synthetic baseband
+**IQ recording** — real C/A codes, real navigation frames, Doppler, atmospheric
+delay and thermal noise — as a raw interleaved binary plus a JSON sidecar.
+
 ```
 gnss-simulator/
 ├── crates/
-│   ├── gnss-core/     Rust: RINEX Nav parsing, ephemeris propagation, az/el
+│   ├── gnss-core/     Rust: RINEX Nav parsing, propagation, clock, atmosphere, az/el
+│   ├── gnss-iq/       Rust: IQ synthesis and the gnss-iq-worker binary
 │   └── gnss-wasm/     wasm-bindgen wrapper around gnss-core
-├── web/               Next.js frontend (App Router, TypeScript)
-├── data/              cached RINEX Nav files
+├── web/               Next.js frontend + job API (App Router, TypeScript)
+├── data/              cached RINEX Nav files, job records and outputs
 ├── tools/             independent Python reference implementation
 └── docs/adr/          architecture decision records
 ```
@@ -25,18 +30,23 @@ Prerequisites: a Rust toolchain, [`wasm-pack`](https://rustwasm.github.io/wasm-p
 and Node 20+.
 
 ```bash
+cargo build --release -p gnss-iq
 cd web && npm install && npm run build:wasm && npm run dev
 ```
 
 Then open <http://localhost:3000>. `build:wasm` compiles `gnss-wasm` into
 `web/src/wasm/`. Ephemeris is fetched on demand and needs network access on
-first use of a given day.
+first use of a given day. The IQ worker must be built before the job API will
+accept work — it says so explicitly if it is missing.
 
 Run the Rust test suite, including the cross-validation:
 
 ```bash
-cargo test
+cargo test --workspace --release
 ```
+
+`--release` is not optional in practice: the acquisition cross-check spends
+minutes in the FFT otherwise.
 
 ## How it works
 
@@ -86,18 +96,87 @@ python3 tools/reference_skyplot.py --emit-vectors \
     > crates/gnss-core/tests/vectors/reference_vectors.json   # regenerate
 ```
 
+## IQ generation
+
+A job is submitted, queued, run in a subprocess, and retrieved by polling.
+
+```bash
+curl -X POST http://localhost:3000/api/jobs -H 'Content-Type: application/json' -d '{
+  "receiver": {"latitude_deg": 39.7392, "longitude_deg": -104.9903, "altitude_m": 1609},
+  "window":   {"start_unix_s": 1751198400, "duration_s": 2, "epoch_interval_s": 0.1},
+  "output":   {"sample_rate_hz": 2600000, "quantization": "int8"},
+  "noise":    {"pseudorange": {"model": "fixed", "sigma_m": 1.5}},
+  "seed": 42
+}'
+```
+
+Only `receiver` and `window` are required; everything else has a documented
+default. Then `GET /api/jobs/{id}` until `status` is `complete`, and fetch
+`/api/jobs/{id}/files/binary` and `/files/sidecar`.
+
+The binary is interleaved `I0 Q0 I1 Q1 …`, little-endian, in the requested
+format. The sidecar carries everything needed to read it *and* to reproduce it:
+sample rate, centre frequency, quantisation, byte order, the receiver and
+window, the elevation mask, the exact noise models with their parameters as the
+models themselves report them, the seed actually used, the provenance of the
+ionospheric coefficients, and a per-satellite summary.
+
+The pipeline runs server-side, which is a departure from phases 1–3 — a
+one-minute recording at 4 MHz in int16 is 960 MB, which was never going to be a
+browser tab. See [ADR-0007](./docs/adr/0007-server-side-iq-worker.md).
+
+The worker can also be driven directly, without Node:
+
+```bash
+target/release/gnss-iq-worker --job spec.json --id demo --out ./out \
+    --nav data/BRDC00WRD_R_20250010000_01D_GN.rnx
+```
+
+### What is and is not modelled
+
+GPS L1 C/A only. Real 1023-chip Gold codes, real LNAV subframes 1–3 packed with
+the broadcast clock and ephemeris parameters and correct parity — so the output
+is not merely acquirable but decodable. Subframes 4 and 5 are structurally valid
+and carry no almanac.
+
+Satellite clock correction (polynomial, relativistic and L1 group delay),
+Klobuchar ionosphere, Saastamoinen troposphere, Doppler from the analytic
+satellite velocity, and thermal noise at the commanded C/N0. Elevation masking
+is a hard on/off with no taper, deliberately — that is where phase 3's terrain
+masking will go.
+
+Not modelled: multipath, multi-frequency or multi-constellation output, receiver
+trajectories, front-end filtering (the signal is point-sampled, not
+band-limited, which costs about a decibel of correlation).
+
+### Validating the signal
+
+`crates/gnss-iq/tests/acquisition_cross_check.rs` acquires the generated file
+the way a receiver would — an FFT parallel code-phase search, structurally
+unlike the per-sample forward construction — and checks that the recovered code
+phase matches the pseudorange, the recovered Doppler matches the value derived
+independently from satellite velocity, and the measured C/N0 matches what the
+noise model commanded. A PRN absent from the recording must not acquire.
+
+It earned its keep immediately: code phase was being computed as
+`gps_seconds * chip_rate`, a product near 1.5e15 where one f64 ulp is a quarter
+of a chip — 73 m of range error in the quantity the entire file is built on.
+Residuals dropped from ~50 m to under 11 m once whole seconds were split off
+before the multiplication.
+
 ## Roadmap
 
 | Phase | Goal | Status |
 | ----- | ---- | ------ |
 | 1 | **Static sky plot** — click a lat/lon, see az/el of visible GPS satellites at one timestamp, computed client-side. | Done |
-| 2 | **Time-series sky plot** — animate satellite tracks over a time window; visibility and DOP as functions of time. | Next |
-| 3 | **Terrain masking** — replace the flat elevation mask with a real horizon profile from a DEM, so ridgelines occlude satellites. | |
-| 4 | **Static IQ generation** — synthesise baseband IQ for a stationary receiver: C/A code, carrier Doppler, per-satellite delay and power. | |
+| 2 | **Time-series sky plot** — animate satellite tracks over a time window; visibility and DOP as functions of time. | Done |
+| 3 | **Terrain masking** — replace the flat elevation mask with a real horizon profile from a DEM, so ridgelines occlude satellites. | Next |
+| 4 | **Static IQ generation** — synthesise baseband IQ for a stationary receiver: C/A code, carrier Doppler, per-satellite delay and power. | Done |
 | 5 | **Dynamic target support** — receiver trajectories, with Doppler and delay evolving along the path. | |
 
-Phase 1 is deliberately narrow. Out of scope for it: animated plots, terrain,
-IQ generation, automated CDDIS fetching, GLONASS, and deployment.
+Phase 4 was taken before phase 3. Still out of scope: multi-constellation and
+multi-frequency IQ, receiver trajectories, multipath, automated CDDIS fetching,
+GLONASS, and deployment.
 
 ## Ephemeris data
 
@@ -171,4 +250,6 @@ model, frontend framework and ephemeris source.
 [ADR-0005](./docs/adr/0005-hand-rolled-ephemeris-propagation.md) explains why
 the `rinex` crate is used only as a parser;
 [ADR-0006](./docs/adr/0006-server-side-ephemeris-proxy.md) amends ADR-0002 to
-cover the on-demand fetch route.
+cover the on-demand fetch route, and
+[ADR-0007](./docs/adr/0007-server-side-iq-worker.md) amends it again for the IQ
+worker — the point at which the project genuinely acquired a compute backend.
