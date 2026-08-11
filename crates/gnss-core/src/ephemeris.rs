@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::atmosphere::KlobucharModel;
 use crate::sbas::SbasEphemeris;
 use crate::time::GpsTime;
 use crate::Constellation;
@@ -112,11 +113,21 @@ pub struct KeplerianEphemeris {
 
     /// Clock bias \[s\], drift \[s/s\] and drift rate \[s/s^2\].
     ///
-    /// Not used for look angles; carried through because pseudorange and IQ
-    /// generation (phase 4) need them.
+    /// Not used for look angles; used by [`crate::clock`] for pseudorange and
+    /// IQ generation.
     pub af0: f64,
     pub af1: f64,
     pub af2: f64,
+
+    /// Group delay differential `T_GD` \[s\].
+    ///
+    /// The L1/L2 hardware bias inside the satellite. A single-frequency L1
+    /// user must subtract it from the clock correction (IS-GPS-200
+    /// §20.3.3.3.3.2); a dual-frequency user must not, because the
+    /// ionosphere-free combination removes it already. Zero when the record
+    /// did not carry the field, which errs towards omitting a ~3 ns
+    /// correction rather than inventing one.
+    pub tgd: f64,
 
     /// Issue of data, ephemeris. Distinguishes successive uploads.
     pub iode: f64,
@@ -266,11 +277,29 @@ impl Default for SelectionConfig {
 #[derive(Debug, Clone, Default)]
 pub struct EphemerisSet {
     by_sv: BTreeMap<Sv, Vec<BroadcastEphemeris>>,
+    klobuchar: Option<KlobucharModel>,
 }
 
 impl EphemerisSet {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Klobuchar ionospheric coefficients from the file header, if it carried
+    /// any.
+    ///
+    /// `None` is a real answer, not a failure: plenty of RINEX Nav files omit
+    /// the ionospheric block entirely, and a consumer that needs the
+    /// correction has to decide for itself whether to fall back or refuse.
+    /// Handing back a silent default here would put an invented ionosphere
+    /// into results indistinguishable from a broadcast one.
+    pub fn klobuchar(&self) -> Option<KlobucharModel> {
+        self.klobuchar
+    }
+
+    /// Attach header-derived ionospheric coefficients.
+    pub fn set_klobuchar(&mut self, model: Option<KlobucharModel>) {
+        self.klobuchar = model;
     }
 
     /// Insert a block, keeping each satellite's list sorted by ToE and
@@ -319,6 +348,11 @@ impl EphemerisSet {
                 self.insert(block);
             }
         }
+        // Keep whichever set already had coefficients. Consecutive daily files
+        // carry near-identical Klobuchar blocks (the control segment updates
+        // them slowly), so preferring the existing one just makes the merge
+        // order-independent rather than making a claim about which is better.
+        self.klobuchar = self.klobuchar.or(other.klobuchar);
     }
 
     /// Satellites present in this set.
@@ -477,6 +511,7 @@ mod tests {
             af0: 0.0,
             af1: 0.0,
             af2: 0.0,
+            tgd: 0.0,
             iode,
             health,
         }

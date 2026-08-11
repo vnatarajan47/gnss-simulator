@@ -12,6 +12,7 @@ use std::panic::AssertUnwindSafe;
 
 use rinex::prelude::{Constellation as RinexConstellation, Rinex};
 
+use crate::atmosphere::KlobucharModel;
 use crate::ephemeris::{EphemerisSet, KeplerianEphemeris, Sv};
 use crate::geodesy::Ecef;
 use crate::sbas::{self, SbasEphemeris};
@@ -55,6 +56,8 @@ pub fn parse_nav(bytes: &[u8]) -> Result<EphemerisSet, Error> {
     }
 
     let mut set = EphemerisSet::new();
+    set.set_klobuchar(lift_klobuchar(&rinex));
+
     for (key, frame) in rinex.nav_ephemeris_frames_iter() {
         let Some(constellation) = map_constellation(key.sv.constellation) else {
             continue;
@@ -71,6 +74,28 @@ pub fn parse_nav(bytes: &[u8]) -> Result<EphemerisSet, Error> {
     }
 
     Ok(set)
+}
+
+/// Pull the GPS Klobuchar coefficients out of the file header.
+///
+/// The header can hold one set per constellation (`GPSA`/`GPSB`, `GALA`, ...);
+/// we take the GPS one specifically, because the Klobuchar algorithm and its
+/// semicircle-based polynomials are defined against the GPS broadcast set.
+/// Galileo publishes NeQuick-G instead, which is a different model entirely
+/// and must not be substituted here.
+fn lift_klobuchar(rinex: &Rinex) -> Option<KlobucharModel> {
+    let model = rinex
+        .header
+        .ionod_corrections
+        .get(&RinexConstellation::GPS)?
+        .as_klobuchar()?;
+
+    let (a0, a1, a2, a3) = model.alpha;
+    let (b0, b1, b2, b3) = model.beta;
+    Some(KlobucharModel {
+        alpha: [a0, a1, a2, a3],
+        beta: [b0, b1, b2, b3],
+    })
 }
 
 fn is_gzip(bytes: &[u8]) -> bool {
@@ -178,6 +203,11 @@ fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<Kepler
         af1: frame.clock_drift,
         af2: frame.clock_drift_rate,
 
+        // Absent for constellations that broadcast a different bias set
+        // (Galileo publishes BGD E5a/E5b instead). Treated as zero rather than
+        // as a parse failure: it is a ~3 ns refinement, not a required element.
+        tgd: field("tgd").unwrap_or(0.0),
+
         iode: field("iode").unwrap_or(f64::NAN),
         // Absent health word is treated as healthy: a missing field means the
         // record did not carry one, not that the satellite is unusable.
@@ -263,6 +293,49 @@ mod tests {
         assert_eq!(normalise_prn(Constellation::Sbas, 131), 131);
         // Other constellations are untouched.
         assert_eq!(normalise_prn(Constellation::Gps, 31), 31);
+    }
+
+    /// The RINEX 3 `IONOSPHERIC CORR` block must reach `EphemerisSet`, and the
+    /// GPS set specifically -- the same header commonly carries `BDSA`/`BDSB`
+    /// and `GAL` rows, and Klobuchar's semicircle polynomials are only defined
+    /// against the GPS coefficients.
+    #[test]
+    fn gps_klobuchar_coefficients_are_lifted_from_the_header() {
+        let text = concat!(
+            "     3.05           N: GNSS NAV DATA    M: MIXED            RINEX VERSION / TYPE\n",
+            "BDSA   3.2596e-08  6.7055e-08 -1.0133e-06  1.5497e-06       IONOSPHERIC CORR    \n",
+            "GPSA   8.3819e-09  2.2352e-08 -5.9605e-08 -1.1921E-07       IONOSPHERIC CORR    \n",
+            "GPSB   9.2160e+04  1.1469e+05 -6.5536e+04 -5.8982E+05       IONOSPHERIC CORR    \n",
+            "                                                            END OF HEADER\n",
+            "G01 2025 01 01 00 00 00 8.645467460160e-06 3.649347490860e-11 0.000000000000e+00\n",
+            "     3.900000000000e+01 9.565625000000e+01 4.723053877010e-09 3.125812576130e+00\n",
+            "     5.071982741360e-06 2.085076412190e-04 1.234933733940e-06 5.153755249020e+03\n",
+            "     2.592000000000e+05 7.636845111850e-08-1.782896012340e+00 8.195638656620e-08\n",
+            "     9.596454288100e-01 3.528437500000e+02-1.317975728420e+00-8.442851678660e-09\n",
+            "     1.582208762490e-10 1.000000000000e+00 2.347000000000e+03 0.000000000000e+00\n",
+            "     2.000000000000e+00 6.300000000000e+01-1.396983861920e-09 3.900000000000e+01\n",
+            "     2.520180000000e+05 4.000000000000e+00\n",
+        );
+
+        let set = parse_nav(text.as_bytes()).expect("header should parse");
+        let model = set.klobuchar().expect("GPSA/GPSB should have been lifted");
+
+        assert_eq!(model.alpha[0], 8.3819e-09);
+        assert_eq!(model.alpha[3], -1.1921e-07);
+        assert_eq!(model.beta[0], 9.2160e+04);
+        assert_eq!(model.beta[3], -5.8982e+05);
+    }
+
+    /// Plenty of files in this archive carry no ionospheric block at all --
+    /// the 2019 BRDC files and every GPS-only subset among them. That has to
+    /// read as absent, not as zeroes, so a consumer can choose a fallback and
+    /// declare that it did.
+    #[test]
+    fn a_header_without_an_ionospheric_block_reports_none() {
+        let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/BRDC00WRD_R_20250010000_01D_GN.rnx");
+        let set = parse_nav(&std::fs::read(file).expect("checked-in fixture")).unwrap();
+        assert!(set.klobuchar().is_none());
     }
 
     #[test]

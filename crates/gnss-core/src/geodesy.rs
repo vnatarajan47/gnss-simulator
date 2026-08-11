@@ -50,6 +50,20 @@ impl Ecef {
         (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }
 
+    /// Dot product with another vector.
+    pub fn dot(self, other: Ecef) -> f64 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    /// Unit vector in the same direction, or `None` at the origin.
+    ///
+    /// Returns `None` rather than NaN so a degenerate geometry has to be
+    /// handled by the caller instead of poisoning the arithmetic downstream.
+    pub fn normalized(self) -> Option<Ecef> {
+        let norm = self.norm();
+        (norm > 0.0).then(|| Ecef::new(self.x / norm, self.y / norm, self.z / norm))
+    }
+
     /// Rotate about the Z axis by `angle_rad` (right-handed / counterclockwise).
     ///
     /// Used to account for Earth rotation during signal propagation.

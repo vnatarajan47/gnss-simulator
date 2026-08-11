@@ -31,6 +31,8 @@
 //! vector requiring numerical integration, not Keplerian elements -- and is
 //! out of scope.
 
+pub mod atmosphere;
+pub mod clock;
 pub mod constants;
 pub mod dop;
 pub mod ephemeris;
@@ -42,6 +44,8 @@ pub mod skyplot;
 pub mod source;
 pub mod time;
 
+pub use atmosphere::{saastamoinen_delay_m, KlobucharModel};
+pub use clock::{clock_correction, ClockCorrection, GroupDelay};
 pub use dop::{dop_for, dop_from_angles, Dop};
 pub use ephemeris::{
     BroadcastEphemeris, EphemerisSet, KeplerianEphemeris, SelectionConfig, SelectionStrategy, Sv,
@@ -49,7 +53,7 @@ pub use ephemeris::{
 pub use geodesy::{
     ecef_to_enu, ecef_to_geodetic, geodetic_to_ecef, look_angles, AzEl, Ecef, Enu, Geodetic,
 };
-pub use propagate::PropagationConfig;
+pub use propagate::{apparent_state, state_at, PropagationConfig, StateVector};
 pub use sbas::{SbasEphemeris, SbasProvider};
 pub use series::{skyplot_series, SatelliteTrack, SkySeries, TrackSample, MAX_EPOCHS};
 pub use skyplot::{skyplot, skyplot_from_set, SatelliteView, SkyView, SkyplotOptions};
