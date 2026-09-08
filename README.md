@@ -25,6 +25,11 @@ gnss-simulator/
 └── docs/adr/          architecture decision records
 ```
 
+**[docs/methods.md](./docs/methods.md)** specifies the mathematics, the data
+sources, and the validation in full — every algorithm, constant and known data
+defect, with enough detail to reimplement the tool or to decide whether its
+output can be trusted for a given purpose.
+
 ## Quick start
 
 Prerequisites: a Rust toolchain, [`wasm-pack`](https://rustwasm.github.io/wasm-pack/),
@@ -253,6 +258,8 @@ Worth knowing before trusting output from any source, not only this one:
   without needing to know about the sentinel.
 
 ## Architecture decisions
+
+The full methods reference is [`docs/methods.md`](./docs/methods.md).
 
 See [`docs/adr/`](./docs/adr/). ADRs 0001–0004 cover the language, execution
 model, frontend framework and ephemeris source.
