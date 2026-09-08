@@ -29,6 +29,7 @@ function satellite(
   sv: string,
   azimuth: number,
   elevation: number,
+  geostationary = sv.startsWith("S"),
 ): Satellite {
   return {
     sv,
@@ -38,6 +39,7 @@ function satellite(
     elevation,
     rangeKm: 22_000,
     ephemerisAgeS: 0,
+    geostationary,
   };
 }
 

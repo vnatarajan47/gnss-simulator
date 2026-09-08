@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 
@@ -25,10 +26,35 @@ const ARCHIVE_START = "2017-06-01";
  *  visibly rather than hang the UI. */
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
-const CACHE_DIR = path.join(process.cwd(), "..", "data", "cache");
+/**
+ * Where fetched broadcast files are kept.
+ *
+ * `EPHEMERIS_CACHE_DIR` first, then the repo's `data/cache` in a checkout,
+ * then the system temp directory. The fallback is what makes this deployable:
+ * a serverless or container filesystem is usually read-only outside `/tmp`,
+ * and the cache is an optimisation — losing it costs a few seconds per cold
+ * day, where crashing on it costs the page. Every cache operation below is
+ * therefore best-effort.
+ */
+const CACHE_DIR =
+  process.env.EPHEMERIS_CACHE_DIR ??
+  (existsSync(path.join(process.cwd(), "..", "data"))
+    ? path.join(process.cwd(), "..", "data", "cache")
+    : path.join(os.tmpdir(), "gnss-simulator-ephemeris"));
 
 /** RINEX 3 constellation codes this project can propagate. */
 const SUPPORTED_CODES = new Set(["G", "E", "C", "J", "S"]);
+
+/**
+ * How far either side of the requested window records are kept \[s\].
+ *
+ * A record is only useful for an epoch within its curve-fit interval, which is
+ * two hours for the Keplerian constellations and fifteen minutes for SBAS. An
+ * hour of slack on top of the widest of those covers selection at either end
+ * of the window, including the block *after* the window that a nearest-ToE
+ * search legitimately reaches for.
+ */
+const WINDOW_MARGIN_S = 3 * 3600;
 
 function dayOfYear(date: Date): number {
   const start = Date.UTC(date.getUTCFullYear(), 0, 1);
@@ -54,6 +80,40 @@ function todayUtc(): Date {
 }
 
 /**
+ * Whether a record's epoch falls inside the requested window.
+ *
+ * The epoch is fixed-column on the record's first line: `YYYY MM DD hh mm ss`
+ * starting at column 4. A line that does not parse is *kept* — this is a size
+ * optimisation, and the failure mode of guessing wrong must be a larger
+ * response, never a missing satellite.
+ *
+ * BeiDou stamps its epochs in BDT, 14 s from the GPS time the window is
+ * expressed in. Against a three-hour margin that is not worth correcting for.
+ */
+function isWithinWindow(
+  line: string,
+  window: { fromS: number; toS: number } | null,
+): boolean {
+  if (window === null) return true;
+
+  const epoch = Date.UTC(
+    Number(line.slice(4, 8)),
+    Number(line.slice(9, 11)) - 1,
+    Number(line.slice(12, 14)),
+    Number(line.slice(15, 17)),
+    Number(line.slice(18, 20)),
+    Number(line.slice(21, 23)),
+  );
+  if (Number.isNaN(epoch)) return true;
+
+  const seconds = epoch / 1000;
+  return (
+    seconds >= window.fromS - WINDOW_MARGIN_S &&
+    seconds <= window.toS + WINDOW_MARGIN_S
+  );
+}
+
+/**
  * Split a RINEX 3 navigation file and keep only the requested constellations.
  *
  * A record begins on a line matching `<sysid><2-digit PRN>` at column 0 and runs
@@ -61,6 +121,11 @@ function todayUtc(): Date {
  * record start is more robust than assuming a fixed line count, which varies by
  * constellation (GLONASS/SBAS use 4 lines, the Keplerian systems 8) and by
  * message type.
+ *
+ * Records outside the requested time window (plus [`WINDOW_MARGIN_S`]) are
+ * dropped too. That matters much more than it used to: with several
+ * constellations switched on a whole day is several megabytes of text, most of
+ * it describing hours the user is not looking at.
  *
  * Trimming matters for responsiveness: a full mixed file is ~8 MB of text, of
  * which the GPS records are ~300 kB. Parsing the trimmed file in WASM takes
@@ -70,6 +135,7 @@ function filterConstellations(
   text: string,
   keep: Set<string>,
   sbasPrns: Set<number> | null,
+  window: { fromS: number; toS: number } | null,
 ): { body: string; records: number } {
   const lines = text.split("\n");
   const headerEnd = lines.findIndex((line) => line.includes("END OF HEADER"));
@@ -111,7 +177,8 @@ function filterConstellations(
       keep.has(lines[i][0]) &&
       (lines[i][0] !== "S" ||
         sbasPrns === null ||
-        sbasPrns.has(Number(lines[i].slice(1, 3)) + 100));
+        sbasPrns.has(Number(lines[i].slice(1, 3)) + 100)) &&
+      isWithinWindow(lines[i], window);
 
     if (isWanted) {
       // Trailing blank lines are not part of the record. Sweeping them in
@@ -146,13 +213,18 @@ async function fetchWithCache(
   const cachePath = path.join(CACHE_DIR, filename);
   const endOfDay = date.getTime() + 86_400_000;
 
-  if (existsSync(cachePath)) {
-    const writtenAt = (await stat(cachePath)).mtimeMs;
-    if (writtenAt > endOfDay) {
-      return { raw: await readFile(cachePath), filename, cached: true };
+  try {
+    if (existsSync(cachePath)) {
+      const writtenAt = (await stat(cachePath)).mtimeMs;
+      if (writtenAt > endOfDay) {
+        return { raw: await readFile(cachePath), filename, cached: true };
+      }
+      // Partial: fetched while the day was still running. Fall through and
+      // refetch, overwriting it.
     }
-    // Partial: fetched while the day was still running. Fall through and
-    // refetch, overwriting it.
+  } catch (cause) {
+    // An unreadable cache is not a reason to fail the request.
+    console.warn(`ephemeris cache read failed for ${filename}:`, cause);
   }
 
   const controller = new AbortController();
@@ -174,8 +246,15 @@ async function fetchWithCache(
 
   const raw = Buffer.from(await response.arrayBuffer());
 
-  await mkdir(CACHE_DIR, { recursive: true });
-  await writeFile(cachePath, raw);
+  // Best-effort: a read-only or full filesystem costs the next request a
+  // refetch, which is a far better outcome than a 500 on a page that already
+  // has the data it needs in hand.
+  try {
+    await mkdir(CACHE_DIR, { recursive: true });
+    await writeFile(cachePath, raw);
+  } catch (cause) {
+    console.warn(`ephemeris cache write failed for ${filename}:`, cause);
+  }
 
   return { raw, filename, cached: false };
 }
@@ -198,6 +277,15 @@ export async function GET(request: Request) {
           .filter((prn) => Number.isFinite(prn)),
       )
     : null;
+
+  // Optional time-window narrowing, in Unix seconds. Absent means "keep the
+  // whole day", which is what a caller that has not been updated will get.
+  const fromS = Number(params.get("from"));
+  const toS = Number(params.get("to"));
+  const window =
+    Number.isFinite(fromS) && Number.isFinite(toS) && toS >= fromS
+      ? { fromS, toS }
+      : null;
 
   if (!dateParam || !/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
     return Response.json(
@@ -248,6 +336,7 @@ export async function GET(request: Request) {
       gunzipSync(raw).toString("latin1"),
       keep,
       sbasPrns,
+      window,
     );
 
     if (records === 0) {
@@ -255,6 +344,7 @@ export async function GET(request: Request) {
         {
           error:
             `no ${[...keep].join(",")} records in ${filename}` +
+            (window ? " for the requested time window" : "") +
             // SBAS coverage in this product is patchy historically: files
             // before ~2021 carry none at all, and WAAS appears later still.
             (keep.has("S")
@@ -278,6 +368,7 @@ export async function GET(request: Request) {
         ETag: `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`,
         "X-Ephemeris-Source": filename,
         "X-Ephemeris-Records": String(records),
+        "X-Ephemeris-Bytes": String(Buffer.byteLength(body)),
         "X-Ephemeris-Cached": String(cached),
         // Today's file only covers the hours elapsed so far.
         "X-Ephemeris-Partial": String(isToday),

@@ -1,13 +1,19 @@
 "use client";
 
-import { SOURCES, type SourceStatus } from "@/lib/coverage";
+import { SOURCES, type Source, type SourceStatus } from "@/lib/coverage";
 
 /**
  * Click a source to switch it on or off.
  *
  * Only validated sources are switchable. The rest are shown deliberately —
- * knowing *why* Galileo is off is more useful than not seeing it at all — but
- * are rendered as disabled buttons with the reason in the tooltip.
+ * knowing *why* SDCM is off is more useful than not seeing it at all — but are
+ * rendered as disabled buttons with the reason in the tooltip.
+ *
+ * The two groups are not cosmetic. Core constellations are global: switching
+ * one on adds satellites wherever the receiver is. Augmentation systems are
+ * regional, and enabling the wrong one adds nothing at all — so each carries
+ * the region it serves, and the group is labelled as regional rather than
+ * leaving the user to discover it from an empty plot.
  */
 
 const PALETTE: Record<
@@ -40,14 +46,55 @@ export default function SourceToggles({
   enabled: string[];
   onToggle: (key: string) => void;
 }) {
+  const constellations = SOURCES.filter((s) => s.kind === "constellation");
+  const augmentations = SOURCES.filter((s) => s.kind === "augmentation");
+
   return (
     <section style={styles.wrapper}>
-      <h2 style={styles.heading}>Sources</h2>
+      <Group
+        heading="Constellations"
+        hint="Global — visible from anywhere."
+        sources={constellations}
+        enabled={enabled}
+        onToggle={onToggle}
+      />
+      <Group
+        heading="Augmentation (SBAS)"
+        hint="Regional — each is geostationary over the area it serves, and invisible from the other side of the world."
+        sources={augmentations}
+        enabled={enabled}
+        onToggle={onToggle}
+      />
+      <p style={styles.footnote}>
+        Greyed sources are not selectable — hover for the reason. Only sources
+        validated against an independent implementation can be switched on.
+      </p>
+    </section>
+  );
+}
+
+function Group({
+  heading,
+  hint,
+  sources,
+  enabled,
+  onToggle,
+}: {
+  heading: string;
+  hint: string;
+  sources: Source[];
+  enabled: string[];
+  onToggle: (key: string) => void;
+}) {
+  return (
+    <div style={styles.group}>
+      <h2 style={styles.heading}>{heading}</h2>
       <div style={styles.row}>
-        {SOURCES.map((source) => {
+        {sources.map((source) => {
           const isOn = enabled.includes(source.key);
           const switchable = source.status === "supported";
           const palette = PALETTE[source.status];
+          const where = source.region ? ` Covers ${source.region}.` : "";
 
           return (
             <button
@@ -58,7 +105,7 @@ export default function SourceToggles({
               aria-pressed={isOn}
               title={
                 switchable
-                  ? `${source.note} Click to turn ${isOn ? "off" : "on"}.`
+                  ? `${source.note}${where} Click to turn ${isOn ? "off" : "on"}.`
                   : `Not selectable — ${source.note}`
               }
               style={{
@@ -72,16 +119,14 @@ export default function SourceToggles({
           );
         })}
       </div>
-      <p style={styles.footnote}>
-        Greyed sources are not selectable yet — hover for the reason. Only
-        validated sources can be switched on.
-      </p>
-    </section>
+      <p style={styles.hint}>{hint}</p>
+    </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   wrapper: { marginBottom: 12 },
+  group: { marginBottom: 8 },
   heading: {
     fontSize: 11,
     textTransform: "uppercase",
@@ -90,6 +135,7 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.4,
   },
   row: { display: "flex", flexWrap: "wrap", gap: 6 },
+  hint: { fontSize: 11, color: "#9ca3af", margin: "4px 0 0" },
   chip: {
     fontSize: 12,
     fontWeight: 600,

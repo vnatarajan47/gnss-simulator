@@ -149,13 +149,13 @@ export default function SkyPlot({
           ),
       )}
 
-      {placements.map(({ satellite, marker, isSbas, label }) => {
+      {placements.map(({ satellite, marker, isGeostationary, label }) => {
         const fill = elevationColour(satellite.elevation);
         return (
           <g key={satellite.sv}>
             {/* Geostationary augmentation satellites get a square marker, so
                 they read as a different kind of thing at a glance. */}
-            {isSbas ? (
+            {isGeostationary ? (
               <rect
                 x={marker.x - MARKER_RADIUS}
                 y={marker.y - MARKER_RADIUS}

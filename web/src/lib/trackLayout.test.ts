@@ -29,6 +29,7 @@ function track(sv: string, indices: number[]): SatelliteTrack {
     sv,
     prn: Number(sv.slice(1)),
     source: sv.startsWith("S") ? "WAAS" : "GPS",
+    geostationary: sv.startsWith("S"),
     samples: indices.map((i) => sample(i, (i * 7) % 360, 10 + (i % 60))),
   };
 }
@@ -169,6 +170,9 @@ describe("satellitesByEpoch", () => {
     assert.equal(satellite.source, "WAAS");
     assert.equal(typeof satellite.rangeKm, "number");
     assert.equal(typeof satellite.ephemerisAgeS, "number");
+    // Geostationary is a property of the orbit, carried on the track rather
+    // than guessed from the identifier -- BeiDou and QZSS fly GEOs too.
+    assert.equal(satellite.geostationary, true);
   });
 
   it("ignores a sample pointing outside the epoch array", () => {
@@ -256,6 +260,7 @@ describe("plot synchronisation", () => {
       hdop: 1 + i / 100,
       vdop: 1.4,
       tdop: 0.9,
+      systems: 1,
       satellites: 4,
     }));
 

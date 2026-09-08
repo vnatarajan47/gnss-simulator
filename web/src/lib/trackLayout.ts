@@ -121,6 +121,7 @@ export function satellitesByEpoch(series: SkySeries): Satellite[][] {
         elevation: sample.elevation,
         rangeKm: sample.rangeKm,
         ephemerisAgeS: sample.ephemerisAgeS,
+        geostationary: track.geostationary,
       });
     }
   }

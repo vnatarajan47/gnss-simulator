@@ -4,16 +4,17 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import DopPlot from "@/components/DopPlot";
+import ReceiverControls from "@/components/ReceiverControls";
 import SkyPlot from "@/components/SkyPlot";
 import SourceToggles from "@/components/SourceToggles";
 import TimeControls from "@/components/TimeControls";
 import {
   ARCHIVE_START,
   DEFAULT_ENABLED,
-  isBeforeSbasCoverage,
+  normaliseLongitude,
   rinexCodesFor,
   sbasPrnsFor,
-  sourceByKey,
+  sourcesUnavailableOn,
 } from "@/lib/coverage";
 import { loadEphemerisRange, type EphemerisMeta } from "@/lib/ephemeris";
 import {
@@ -39,6 +40,14 @@ const MapPanel = dynamic(() => import("@/components/MapPanel"), {
   loading: () => <Placeholder>Loading map…</Placeholder>,
 });
 
+/**
+ * Where the receiver starts.
+ *
+ * Denver, kept from phase 1. Any fixed point is arbitrary now that coverage is
+ * global, and a fixed one is worth more than a clever one: the first load is
+ * reproducible, and geolocating the browser would ask for a permission the app
+ * has no other use for.
+ */
 const DEFAULT_OBSERVER: Observer = { lat: 39.7392, lon: -104.9903, altM: 1609 };
 
 /** Default window: six hours from midday on the most recent complete UTC day. */
@@ -75,7 +84,6 @@ export default function Workbench() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [computeError, setComputeError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [series, setSeries] = useState<SkySeries | null>(null);
 
   const startS = inputToUnixSeconds(start);
@@ -104,7 +112,7 @@ export default function Workbench() {
     setLoading(true);
     setLoadError(null);
 
-    loadEphemerisRange(dayList, rinexCodes, sbasPrns)
+    loadEphemerisRange(dayList, rinexCodes, sbasPrns, { startS, endS })
       .then(({ plotter: instance, days: info, elapsedMs }) => {
         if (token !== latestRequest.current) return;
         setPlotter(instance);
@@ -123,7 +131,7 @@ export default function Workbench() {
       });
     // `dayKey` stands in for `dayList`, whose identity changes every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayKey, rinexCodes, sbasPrns]);
+  }, [dayKey, rinexCodes, sbasPrns, startS, endS]);
 
   // Recompute the series whenever the observer, window, mask or sources change.
   useEffect(() => {
@@ -172,41 +180,43 @@ export default function Workbench() {
   }, [epochCount]);
 
   const onSelect = useCallback((lat: number, lon: number) => {
-    // Altitude is not resolved from the map yet — a DEM lookup is phase 3.
-    // Ellipsoidal height affects elevation angle by well under 0.01 deg.
-    setObserver((previous) => ({ ...previous, lat, lon }));
-    setNotice(null);
-  }, []);
-
-  const onRejected = useCallback(() => {
-    setNotice("Outside the supported region — phase 1 covers the continental US.");
+    // Height is not resolved from the map — a DEM lookup is phase 3. Ellipsoidal
+    // height affects the elevation angle by well under 0.01 deg, so the field
+    // beneath the map is the way to set it when it matters.
+    setObserver((previous) => ({
+      ...previous,
+      lat,
+      lon: normaliseLongitude(lon),
+    }));
   }, []);
 
   const error = loadError ?? computeError;
   const anyPartial = days.some((day) => day.partial);
-  const showSbasWarning =
-    dayList.some(isBeforeSbasCoverage) &&
-    enabled.some((key) => sourceByKey(key)?.rinexCode === "S");
+  // Which of the *user's own* choices the archive cannot answer for on these
+  // days. Naming them matters now that there are ten sources on two different
+  // start dates: "no SBAS before 2025" was actionable when WAAS was the only
+  // augmentation, and is not any more.
+  const unavailable = sourcesUnavailableOn(enabled, dayList);
 
   return (
     <main style={styles.page}>
       <header style={styles.header}>
         <h1 style={styles.title}>GNSS sky plot</h1>
         <span style={styles.subtitle}>
-          Broadcast ephemeris · computed client-side in WASM
+          Any point on Earth · broadcast ephemeris · computed client-side in WASM
         </span>
       </header>
 
       <div style={styles.columns}>
         <section style={styles.mapColumn}>
           <div style={styles.mapFrame}>
-            <MapPanel observer={observer} onSelect={onSelect} onRejected={onRejected} />
+            <MapPanel observer={observer} onSelect={onSelect} />
           </div>
           <p style={styles.hint}>
-            <span style={styles.legendSwatch} /> Click inside the outlined region to
-            move the receiver. Shaded areas are outside phase-1 coverage.
+            Click anywhere to move the receiver, or type coordinates. Web
+            Mercator stops short of the poles; the fields reach them.
           </p>
-          {notice && <p style={styles.notice}>{notice}</p>}
+          <ReceiverControls observer={observer} onChange={setObserver} />
         </section>
 
         <section style={styles.plotColumn}>
@@ -260,13 +270,20 @@ export default function Workbench() {
           )}
           {error && <p style={styles.error}>{error}</p>}
 
-          {/* SBAS coverage in this archive starts much later than GNSS
-              coverage, so an old date silently yields no SBAS satellites.
-              Say so rather than leaving the user to wonder. */}
-          {!loading && !error && showSbasWarning && (
+          {/* Augmentation coverage in this archive starts much later than GNSS
+              coverage, and not on one date for all of it, so an old day
+              silently yields nothing for some sources. Name them rather than
+              leaving the user to wonder which of their choices went missing. */}
+          {!loading && !error && unavailable.length > 0 && (
             <p style={styles.warning}>
-              The broadcast archive carries no usable SBAS before 2025 — SBAS
-              sources will be empty in this window.
+              The broadcast archive only carries{" "}
+              {unavailable.map((source) => source.label).join(", ")} reliably
+              from{" "}
+              {unavailable
+                .map((source) => source.availableFrom)
+                .reduce((a, b) => (a! < b! ? b : a))}
+              . Before that {unavailable.length > 1 ? "they" : "it"} may be
+              missing or incomplete in this window.
             </p>
           )}
 
@@ -291,6 +308,13 @@ export default function Workbench() {
                 <Stat label="Visible now" value={satellites.length} />
                 <Stat label="Tracks in window" value={series.tracks.length} />
                 <Stat label="Epochs" value={series.epochs.length} />
+                {/* Surfaced because it changes how many satellites a fix needs
+                    and what GDOP is comparable to: one clock per time system,
+                    and each one costs a satellite. */}
+                <Stat
+                  label="Clock unknowns"
+                  value={series.dop[safeCursor]?.systems ?? 0}
+                />
               </dl>
 
               {series.epochsWithoutEphemeris > 0 && (
@@ -306,6 +330,7 @@ export default function Workbench() {
                   <tr>
                     <th style={styles.th}>SV</th>
                     <th style={styles.th}>Source</th>
+                    <th style={styles.th}>Orbit</th>
                     <th style={styles.thNum}>Az&deg;</th>
                     <th style={styles.thNum}>El&deg;</th>
                     <th style={styles.thNum}>Range km</th>
@@ -316,6 +341,9 @@ export default function Workbench() {
                     <tr key={satellite.sv}>
                       <td style={styles.td}>{satellite.sv}</td>
                       <td style={styles.tdMuted}>{satellite.source}</td>
+                      <td style={styles.tdMuted}>
+                        {satellite.geostationary ? "GEO" : "—"}
+                      </td>
                       <td style={styles.tdNum}>{satellite.azimuth.toFixed(2)}</td>
                       <td style={styles.tdNum}>{satellite.elevation.toFixed(2)}</td>
                       <td style={styles.tdNum}>{satellite.rangeKm.toFixed(1)}</td>
@@ -334,6 +362,10 @@ export default function Workbench() {
                 <br />
                 {days.map((day) => day.date).join(" + ")} ·{" "}
                 {days.reduce((total, day) => total + day.records, 0)} records ·{" "}
+                {Math.round(
+                  days.reduce((total, day) => total + day.bytes, 0) / 1024,
+                )}{" "}
+                kB ·{" "}
                 {days.every((day) => day.cached) ? "cached" : "fetched"} in {loadMs} ms
               </>
             )}
@@ -373,15 +405,6 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: "hidden",
   },
   hint: { fontSize: 12, color: "#6b7280", marginTop: 6 },
-  legendSwatch: {
-    display: "inline-block",
-    width: 18,
-    height: 10,
-    border: "2px dashed #2563eb",
-    marginRight: 6,
-    verticalAlign: "middle",
-  },
-  notice: { fontSize: 12, color: "#b45309", marginTop: 4 },
   plotColumn: { flex: "0 1 460px", minWidth: 320 },
   label: { display: "flex", flexDirection: "column", gap: 4, fontSize: 13, marginBottom: 12 },
   stats: { display: "flex", gap: 24, margin: "12px 0" },

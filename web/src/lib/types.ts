@@ -15,6 +15,16 @@ export interface Satellite {
   rangeKm: number;
   /** Signed `t - ToE` of the ephemeris used [s]. */
   ephemerisAgeS: number;
+  /**
+   * Whether the satellite is geostationary, so the plot can mark it as one
+   * that sits still rather than sweeps.
+   *
+   * Decided in `gnss-core` from the broadcast orbital elements. It is no
+   * longer true that "SBAS" and "geostationary" name the same set — BeiDou's
+   * C01-C05 and QZSS's J07/J08 are geostationary too — so this cannot be
+   * inferred from the identifier.
+   */
+  geostationary: boolean;
 }
 
 export interface SkyView {
@@ -41,6 +51,16 @@ export interface Dop {
   tdop: number;
   /** How many satellites entered the solution. */
   satellites: number;
+  /**
+   * How many distinct time systems they spanned, i.e. how many clock unknowns
+   * were solved for.
+   *
+   * Satellites from different constellations do not share a receiver clock, so
+   * each system present adds an unknown — which needs one more satellite
+   * before a solution exists at all, and makes GDOP incomparable across
+   * different selections.
+   */
+  systems: number;
 }
 
 /** One satellite at one sampled instant of a series. */
@@ -58,6 +78,8 @@ export interface SatelliteTrack {
   sv: string;
   prn: number;
   source: string;
+  /** Geostationary: this track is a point rather than an arc. */
+  geostationary: boolean;
   /**
    * Ascending by `epochIndex`, with gaps where the satellite was below the
    * mask. A break in the run is a set/rise and must not be drawn as a line —

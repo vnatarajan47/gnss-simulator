@@ -65,6 +65,9 @@ pub struct TrackSample {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SatelliteTrack {
     pub sv: Sv,
+    /// Whether this satellite is geostationary, i.e. whether its "track" is a
+    /// point rather than an arc.
+    pub geostationary: bool,
     /// Ascending by `epoch_index`, with gaps wherever the satellite was below
     /// the mask or had no usable ephemeris.
     pub samples: Vec<TrackSample>,
@@ -152,7 +155,10 @@ pub fn skyplot_series(
     let mut epochs = Vec::with_capacity(count);
     let mut dop = Vec::with_capacity(count);
     let mut visible = Vec::with_capacity(count);
-    let mut by_satellite: BTreeMap<Sv, Vec<TrackSample>> = BTreeMap::new();
+    // Sample runs, and the geostationary flag that goes with each satellite.
+    // The flag comes from the same view the samples do, so it cannot disagree
+    // with what the single-epoch path reports.
+    let mut by_satellite: BTreeMap<Sv, (bool, Vec<TrackSample>)> = BTreeMap::new();
     let mut epochs_without_ephemeris = 0;
 
     for index in 0..count {
@@ -175,10 +181,9 @@ pub fn skyplot_series(
         };
 
         for satellite in &view.satellites {
-            by_satellite
-                .entry(satellite.sv)
-                .or_default()
-                .push(TrackSample {
+            let entry = by_satellite.entry(satellite.sv).or_default();
+            entry.0 = satellite.geostationary;
+            entry.1.push(TrackSample {
                     epoch_index: index,
                     azimuth_deg: satellite.azimuth_deg,
                     elevation_deg: satellite.elevation_deg,
@@ -202,7 +207,11 @@ pub fn skyplot_series(
     // single-epoch view's sort.
     let tracks = by_satellite
         .into_iter()
-        .map(|(sv, samples)| SatelliteTrack { sv, samples })
+        .map(|(sv, (geostationary, samples))| SatelliteTrack {
+            sv,
+            geostationary,
+            samples,
+        })
         .collect();
 
     Ok(SkySeries {
