@@ -61,6 +61,21 @@ impl Ecef {
             self.z,
         )
     }
+
+    /// Rotate the vector about the x-axis by `angle_rad`, right-handed.
+    ///
+    /// Only BeiDou's geostationary satellites need this: their broadcast
+    /// elements are referred to a plane tilted 5 deg out of the equator, and
+    /// the ICD's transformation to Earth-fixed coordinates undoes that tilt
+    /// before applying the Earth rotation.
+    pub fn rotate_x(self, angle_rad: f64) -> Ecef {
+        let (sin_a, cos_a) = angle_rad.sin_cos();
+        Ecef::new(
+            self.x,
+            self.y * cos_a - self.z * sin_a,
+            self.y * sin_a + self.z * cos_a,
+        )
+    }
 }
 
 impl std::ops::Sub for Ecef {

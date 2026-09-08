@@ -10,65 +10,84 @@
    "unix_seconds": 1735732800.0,
    "gps_seconds": 1419768018.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 303.4699049318891,
      "elevation": 34.462505849638895,
      "range_km": 22884.826512814183,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G10",
      "prn": 10,
+     "time_system": "GPS",
      "azimuth": 100.81055308137574,
      "elevation": 52.08912522308418,
      "range_km": 21200.703981878847,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 56.34145620159643,
      "elevation": 7.759891735497563,
      "range_km": 24745.463994840124,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 280.8136102509598,
      "elevation": 47.28249903353408,
      "range_km": 22172.261956177932,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G23",
      "prn": 23,
+     "time_system": "GPS",
      "azimuth": 115.90757888801349,
      "elevation": 11.452950685028089,
      "range_km": 24409.561181448236,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 93.53358997386763,
      "elevation": 15.395889166391962,
      "range_km": 23905.289923718017,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 168.84977874458562,
      "elevation": 59.03403443345559,
      "range_km": 20881.578782988297,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 191.04851900713498,
      "elevation": 32.370863206109874,
      "range_km": 22402.833719403345,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G32",
      "prn": 32,
+     "time_system": "GPS",
      "azimuth": 27.206456668762748,
      "elevation": 66.8291701706579,
      "range_km": 20790.083041870657,
@@ -81,7 +100,8 @@
     "hdop": 1.0121759960704735,
     "vdop": 1.4409600013070538,
     "tdop": 0.9492187055244456,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -93,65 +113,84 @@
    "unix_seconds": 1735756200.0,
    "gps_seconds": 1419791418.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 153.7605880241719,
      "elevation": 41.86805275455009,
      "range_km": 21785.54486825239,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G07",
      "prn": 7,
+     "time_system": "GPS",
      "azimuth": 320.21649499638494,
      "elevation": 62.61375031951485,
      "range_km": 21208.917056890623,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 117.67142090311418,
      "elevation": 48.5633548432406,
      "range_km": 21166.781592915322,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 184.37447870769648,
      "elevation": 67.58889093393707,
      "range_km": 20485.100355052058,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G14",
      "prn": 14,
+     "time_system": "GPS",
      "azimuth": 233.99202417557927,
      "elevation": 12.472635714425461,
      "range_km": 24561.79947870738,
      "ephemeris_age_s": 42.0
     },
     {
+     "sv": "G16",
      "prn": 16,
+     "time_system": "GPS",
      "azimuth": 49.0157720273129,
      "elevation": 17.79192068172773,
      "range_km": 23734.05246814836,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 299.04820075070785,
      "elevation": 11.8591701931663,
      "range_km": 24522.103455968416,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 69.14658423462967,
      "elevation": 38.129976739362725,
      "range_km": 21803.06679800132,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G30",
      "prn": 30,
+     "time_system": "GPS",
      "azimuth": 292.7607170766241,
      "elevation": 29.99420790660222,
      "range_km": 22993.295931436227,
@@ -164,7 +203,8 @@
     "hdop": 0.9380654341421382,
     "vdop": 1.433510743161321,
     "tdop": 0.885997892809451,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -176,65 +216,84 @@
    "unix_seconds": 1735701300.0,
    "gps_seconds": 1419736518.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 175.49918324128424,
      "elevation": 38.27865377842095,
      "range_km": 22091.820040385293,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G06",
      "prn": 6,
+     "time_system": "GPS",
      "azimuth": 51.237952227348195,
      "elevation": 27.82025678993907,
      "range_km": 23076.354616189674,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G11",
      "prn": 11,
+     "time_system": "GPS",
      "azimuth": 35.98308820814762,
      "elevation": 65.66121269661649,
      "range_km": 20669.25290099385,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 210.05324381032312,
      "elevation": 68.73305745213885,
      "range_km": 20414.496461191728,
      "ephemeris_age_s": -2666.0
     },
     {
+     "sv": "G19",
      "prn": 19,
+     "time_system": "GPS",
      "azimuth": 97.15915446895391,
      "elevation": 15.073355010358465,
      "range_km": 23908.573775441895,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 127.93723129150618,
      "elevation": 65.12278851513119,
      "range_km": 20741.33565418944,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 295.45092201782904,
      "elevation": 49.7115438033143,
      "range_km": 21189.71641486856,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 315.4083306013259,
      "elevation": 6.111498020795914,
      "range_km": 25121.08180760097,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G29",
      "prn": 29,
+     "time_system": "GPS",
      "azimuth": 296.1842508266266,
      "elevation": 22.328440821482054,
      "range_km": 23499.81732324342,
@@ -247,7 +306,8 @@
     "hdop": 1.033595391628319,
     "vdop": 1.2807577151168643,
     "tdop": 0.8631008173494636,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -259,65 +319,84 @@
    "unix_seconds": 1735732800.0,
    "gps_seconds": 1419768018.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 289.58946025620884,
      "elevation": 52.03500334078849,
      "range_km": 21696.34199333515,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G03",
      "prn": 3,
+     "time_system": "GPS",
      "azimuth": 289.2728877218678,
      "elevation": 17.861878580812352,
      "range_km": 23769.47011666327,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 228.06111929642506,
      "elevation": 8.313501091170416,
      "range_km": 25142.945690853066,
      "ephemeris_age_s": 34.0
     },
     {
+     "sv": "G10",
      "prn": 10,
+     "time_system": "GPS",
      "azimuth": 96.71129029811242,
      "elevation": 35.711008228055334,
      "range_km": 22293.115300183457,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G17",
      "prn": 17,
+     "time_system": "GPS",
      "azimuth": 330.281258546735,
      "elevation": 8.537468914786723,
      "range_km": 25229.620671770346,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 252.19076073199346,
      "elevation": 62.38029920509513,
      "range_km": 21392.445837804218,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 142.48785271771268,
      "elevation": 43.76795202675636,
      "range_km": 21740.92276625939,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 168.36239245621078,
      "elevation": 23.417918393974514,
      "range_km": 23181.051190441278,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G32",
      "prn": 32,
+     "time_system": "GPS",
      "azimuth": 57.85773274940635,
      "elevation": 63.06321641180386,
      "range_km": 20931.47764583471,
@@ -330,7 +409,8 @@
     "hdop": 0.9492924560643692,
     "vdop": 1.3098347800706167,
     "tdop": 0.8323249204164387,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -342,72 +422,93 @@
    "unix_seconds": 1735756200.0,
    "gps_seconds": 1419791418.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 135.83865889309584,
      "elevation": 26.090814220276915,
      "range_km": 23041.003086077017,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 319.4905561870963,
      "elevation": 17.55738339607407,
      "range_km": 23809.77420911602,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G07",
      "prn": 7,
+     "time_system": "GPS",
      "azimuth": 332.5503845122762,
      "elevation": 80.31742611138394,
      "range_km": 20724.810253898435,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 108.3825671530379,
      "elevation": 31.246137317955217,
      "range_km": 22411.551511722497,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 147.34958919683132,
      "elevation": 53.778532779627355,
      "range_km": 21079.591471484222,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G14",
      "prn": 14,
+     "time_system": "GPS",
      "azimuth": 214.36793794357501,
      "elevation": 15.848113105216179,
      "range_km": 24217.644039612136,
      "ephemeris_age_s": 42.0
     },
     {
+     "sv": "G16",
      "prn": 16,
+     "time_system": "GPS",
      "azimuth": 44.96397063935537,
      "elevation": 13.637861273959517,
      "range_km": 24152.483458675084,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 285.4046166508273,
      "elevation": 27.733636026588144,
      "range_km": 23001.116120099392,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 68.81163815375903,
      "elevation": 27.75059572185796,
      "range_km": 22644.31477473387,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G30",
      "prn": 30,
+     "time_system": "GPS",
      "azimuth": 275.5245673624847,
      "elevation": 46.55506667354644,
      "range_km": 21765.49055496157,
@@ -420,7 +521,8 @@
     "hdop": 0.8072334965158026,
     "vdop": 1.3780667038337164,
     "tdop": 0.7870456085255213,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -432,65 +534,84 @@
    "unix_seconds": 1735701300.0,
    "gps_seconds": 1419736518.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 153.79526026145837,
      "elevation": 25.757522569548,
      "range_km": 23119.106070113958,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G06",
      "prn": 6,
+     "time_system": "GPS",
      "azimuth": 50.039169589059895,
      "elevation": 22.47340979847403,
      "range_km": 23562.216373568208,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G11",
      "prn": 11,
+     "time_system": "GPS",
      "azimuth": 61.670650930423506,
      "elevation": 59.84109016887648,
      "range_km": 20904.75416222189,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 160.40015906143287,
      "elevation": 59.75956818899345,
      "range_km": 20754.702127663306,
      "ephemeris_age_s": -2666.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 115.86203045057702,
      "elevation": 46.70035292894204,
      "range_km": 21661.866640569835,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 273.54692772487647,
      "elevation": 67.55596214384191,
      "range_km": 20372.41704304467,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 304.4318752502388,
      "elevation": 21.64440023857494,
      "range_km": 23545.709043580926,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G29",
      "prn": 29,
+     "time_system": "GPS",
      "azimuth": 281.0365659783389,
      "elevation": 38.74139218760586,
      "range_km": 22124.594023355523,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 327.69008221557095,
      "elevation": 9.506792807684551,
      "range_km": 24568.620749221453,
@@ -503,7 +624,8 @@
     "hdop": 1.02964225690864,
     "vdop": 1.5075743936631347,
     "tdop": 0.9887528512095233,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -515,72 +637,93 @@
    "unix_seconds": 1735732800.0,
    "gps_seconds": 1419768018.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 315.36034024664445,
      "elevation": 7.310841927052374,
      "range_km": 25447.27944063898,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G10",
      "prn": 10,
+     "time_system": "GPS",
      "azimuth": 64.83329922083315,
      "elevation": 78.96710975364597,
      "range_km": 20236.36998651669,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 58.28698185418406,
      "elevation": 18.722251769773575,
      "range_km": 23622.69785718309,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 299.99741176509315,
      "elevation": 19.267536570345783,
      "range_km": 24426.47311443091,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G23",
      "prn": 23,
+     "time_system": "GPS",
      "azimuth": 129.34431697996135,
      "elevation": 39.34864856782057,
      "range_km": 21919.29961146032,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 97.21308402038767,
      "elevation": 40.50435083132988,
      "range_km": 21733.16400258051,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G26",
      "prn": 26,
+     "time_system": "GPS",
      "azimuth": 192.4617914418055,
      "elevation": 8.029210221090036,
      "range_km": 24888.942543785484,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 246.97759581362016,
      "elevation": 62.61678371195564,
      "range_km": 20731.491306614866,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 230.07160143459092,
      "elevation": 33.82590816854676,
      "range_km": 22290.727931935777,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G32",
      "prn": 32,
+     "time_system": "GPS",
      "azimuth": 347.63228518103955,
      "elevation": 51.2936422643882,
      "range_km": 21494.796009269307,
@@ -593,7 +736,8 @@
     "hdop": 0.8188112249611833,
     "vdop": 1.1386305574581093,
     "tdop": 0.7000170035657712,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -605,65 +749,84 @@
    "unix_seconds": 1735756200.0,
    "gps_seconds": 1419791418.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 169.36127815464675,
      "elevation": 9.821133828481424,
      "range_km": 24258.797459245383,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 203.85527571696488,
      "elevation": 60.42194301809837,
      "range_km": 20740.929234710922,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G07",
      "prn": 7,
+     "time_system": "GPS",
      "azimuth": 321.9821877274378,
      "elevation": 33.57273809692066,
      "range_km": 22977.03777024326,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 135.17587903444547,
      "elevation": 80.44022654456504,
      "range_km": 19980.235532820305,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 268.0982415335645,
      "elevation": 58.76798452400488,
      "range_km": 20835.192227452255,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G16",
      "prn": 16,
+     "time_system": "GPS",
      "azimuth": 45.89056192141751,
      "elevation": 24.66087772327646,
      "range_km": 23081.685305352363,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 153.38584746638298,
      "elevation": 17.85938484507488,
      "range_km": 23189.10422952438,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 49.87880652693371,
      "elevation": 52.23029937223561,
      "range_km": 20889.7176982348,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 112.34019464394763,
      "elevation": 9.24018234664315,
      "range_km": 25013.148183742574,
@@ -676,7 +839,8 @@
     "hdop": 1.0548303998374275,
     "vdop": 1.409792563272007,
     "tdop": 0.9719983186110958,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -688,72 +852,93 @@
    "unix_seconds": 1735701300.0,
    "gps_seconds": 1419736518.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 221.5991982982607,
      "elevation": 46.336210473629734,
      "range_km": 21542.495624656345,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G06",
      "prn": 6,
+     "time_system": "GPS",
      "azimuth": 41.72566543253543,
      "elevation": 34.56371388160103,
      "range_km": 22512.535486077293,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 55.13531190848928,
      "elevation": 12.258203912416011,
      "range_km": 24437.4012939904,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G11",
      "prn": 11,
+     "time_system": "GPS",
      "azimuth": 352.0393869954105,
      "elevation": 53.604234320519986,
      "range_km": 21205.37290750001,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 276.59013633862037,
      "elevation": 50.91264439860926,
      "range_km": 21204.35294715852,
      "ephemeris_age_s": -2666.0
     },
     {
+     "sv": "G13",
      "prn": 13,
+     "time_system": "GPS",
      "azimuth": 173.70964462731885,
      "elevation": 5.827201808710826,
      "range_km": 25222.104900128983,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G17",
      "prn": 17,
+     "time_system": "GPS",
      "azimuth": 117.37136384701103,
      "elevation": 17.53855295285838,
      "range_km": 23981.024685720222,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G19",
      "prn": 19,
+     "time_system": "GPS",
      "azimuth": 102.26335497164591,
      "elevation": 41.08332455900449,
      "range_km": 21663.797261214393,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 279.1432379116848,
      "elevation": 80.4882238201755,
      "range_km": 20353.55114629245,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 309.50006043013167,
      "elevation": 20.668149639246163,
      "range_km": 23444.607978624263,
@@ -766,7 +951,8 @@
     "hdop": 0.8546773160226163,
     "vdop": 1.2723917813739278,
     "tdop": 0.7848822871593703,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -778,72 +964,93 @@
    "unix_seconds": 1735732800.0,
    "gps_seconds": 1419768018.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 312.8589911621848,
      "elevation": 13.727678314905425,
      "range_km": 24781.251694707116,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G10",
      "prn": 10,
+     "time_system": "GPS",
      "azimuth": 181.66838156894607,
      "elevation": 72.59522433547697,
      "range_km": 20369.381293831382,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 73.19505947168877,
      "elevation": 34.25255868419794,
      "range_km": 22250.550507795324,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 293.5205661782593,
      "elevation": 20.012088065915087,
      "range_km": 24357.93715208069,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G23",
      "prn": 23,
+     "time_system": "GPS",
      "azimuth": 151.71978910292475,
      "elevation": 29.93722819423822,
      "range_km": 22656.308859942787,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G24",
      "prn": 24,
+     "time_system": "GPS",
      "azimuth": 54.72076843913351,
      "elevation": 14.0086867796014,
      "range_km": 24079.159593300632,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 125.704545034839,
      "elevation": 41.74733575972626,
      "range_km": 21643.97639408177,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 232.67498715799525,
      "elevation": 43.84790784794714,
      "range_km": 21736.40336284992,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 229.36040413148461,
      "elevation": 15.393906310315941,
      "range_km": 23956.111111880316,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G32",
      "prn": 32,
+     "time_system": "GPS",
      "azimuth": 320.7091206367037,
      "elevation": 66.52844828316005,
      "range_km": 20802.21966381418,
@@ -856,7 +1063,8 @@
     "hdop": 0.8367882251422641,
     "vdop": 1.3080031878235314,
     "tdop": 0.7688237166923461,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -868,72 +1076,93 @@
    "unix_seconds": 1735756200.0,
    "gps_seconds": 1419791418.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 208.29859124398257,
      "elevation": 38.12748903965488,
      "range_km": 22055.199694548355,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G07",
      "prn": 7,
+     "time_system": "GPS",
      "azimuth": 307.8554302157876,
      "elevation": 41.119919106435475,
      "range_km": 22410.23827625624,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 189.22375947684284,
      "elevation": 61.253882976426965,
      "range_km": 20518.044894413833,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 247.33599261068747,
      "elevation": 44.824572432808374,
      "range_km": 21610.601754638363,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G16",
      "prn": 16,
+     "time_system": "GPS",
      "azimuth": 59.879958062074365,
      "elevation": 43.342583331817835,
      "range_km": 21601.308401896214,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G18",
      "prn": 18,
+     "time_system": "GPS",
      "azimuth": 35.863938050102,
      "elevation": 8.3704999781592,
      "range_km": 24945.094837281056,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G26",
      "prn": 26,
+     "time_system": "GPS",
      "azimuth": 77.06386614878735,
      "elevation": 17.286162158445734,
      "range_km": 24049.143991883222,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 86.15139496699655,
      "elevation": 69.75589921715778,
      "range_km": 20147.845424997886,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G30",
      "prn": 30,
+     "time_system": "GPS",
      "azimuth": 306.2776411128819,
      "elevation": 7.16689791108076,
      "range_km": 25207.900425700398,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 124.98254105045368,
      "elevation": 7.897615692000672,
      "range_km": 25151.915882632413,
@@ -946,7 +1175,8 @@
     "hdop": 0.858193753363143,
     "vdop": 1.1669953211679494,
     "tdop": 0.7026244874767839,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -958,72 +1188,93 @@
    "unix_seconds": 1735701300.0,
    "gps_seconds": 1419736518.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 42.22631563652441,
      "elevation": 14.047801537236635,
      "range_km": 24337.019858227213,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 221.09131701356878,
      "elevation": 25.931742626749916,
      "range_km": 23104.80545550133,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G06",
      "prn": 6,
+     "time_system": "GPS",
      "azimuth": 57.70688213249618,
      "elevation": 54.53607448805858,
      "range_km": 21202.882887789365,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 67.47612290396401,
      "elevation": 28.30369072202284,
      "range_km": 22910.946840369987,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G11",
      "prn": 11,
+     "time_system": "GPS",
      "azimuth": 322.9005234792775,
      "elevation": 70.1059853290979,
      "range_km": 20526.097306394066,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 258.0080457793705,
      "elevation": 40.48904535396196,
      "range_km": 21872.86923913592,
      "ephemeris_age_s": -2666.0
     },
     {
+     "sv": "G17",
      "prn": 17,
+     "time_system": "GPS",
      "azimuth": 132.60473489826032,
      "elevation": 13.988345723444422,
      "range_km": 24331.963883777124,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G19",
      "prn": 19,
+     "time_system": "GPS",
      "azimuth": 130.51988764970847,
      "elevation": 40.40193027772567,
      "range_km": 21709.82764654943,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 227.30074877099554,
      "elevation": 62.69817107849285,
      "range_km": 20835.7353864633,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 301.79843078752356,
      "elevation": 24.569740352036366,
      "range_km": 23085.76415909888,
@@ -1036,7 +1287,8 @@
     "hdop": 0.856829290187233,
     "vdop": 1.3715315810053257,
     "tdop": 0.8592881121585372,
-    "satellites": 10
+    "satellites": 10,
+    "systems": 1
    }
   },
   {
@@ -1048,65 +1300,84 @@
    "unix_seconds": 1735732800.0,
    "gps_seconds": 1419768018.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G02",
      "prn": 2,
+     "time_system": "GPS",
      "azimuth": 308.8452123853243,
      "elevation": 38.95038921133649,
      "range_km": 22541.357369453533,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G03",
      "prn": 3,
+     "time_system": "GPS",
      "azimuth": 298.5896987668721,
      "elevation": 7.5961398249228615,
      "range_km": 24820.914389016143,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 238.06666866422688,
      "elevation": 14.41943636749605,
      "range_km": 24511.68528206711,
      "ephemeris_age_s": 34.0
     },
     {
+     "sv": "G10",
      "prn": 10,
+     "time_system": "GPS",
      "azimuth": 82.81455975278327,
      "elevation": 40.384763355094556,
      "range_km": 21944.851612381335,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G21",
      "prn": 21,
+     "time_system": "GPS",
      "azimuth": 290.09068935399875,
      "elevation": 56.7498634006762,
      "range_km": 21645.367033618484,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 206.73464470715933,
      "elevation": 7.362189961330708,
      "range_km": 25319.90622768647,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 133.24027015393509,
      "elevation": 60.81723058784496,
      "range_km": 20805.44418642308,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G31",
      "prn": 31,
+     "time_system": "GPS",
      "azimuth": 173.2112135571794,
      "elevation": 41.04904510313562,
      "range_km": 21745.557014542617,
      "ephemeris_age_s": 18.0
     },
     {
+     "sv": "G32",
      "prn": 32,
+     "time_system": "GPS",
      "azimuth": 31.892708021107666,
      "elevation": 52.97310321391454,
      "range_km": 21403.580507610397,
@@ -1119,7 +1390,8 @@
     "hdop": 1.0677045986102212,
     "vdop": 1.6453515037558213,
     "tdop": 1.090991968943249,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -1131,65 +1403,84 @@
    "unix_seconds": 1735756200.0,
    "gps_seconds": 1419791418.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G04",
      "prn": 4,
+     "time_system": "GPS",
      "azimuth": 131.03111948283183,
      "elevation": 41.32068491641087,
      "range_km": 21826.664781648567,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G07",
      "prn": 7,
+     "time_system": "GPS",
      "azimuth": 343.1537121824606,
      "elevation": 60.65280681337132,
      "range_km": 21291.411569568336,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G08",
      "prn": 8,
+     "time_system": "GPS",
      "azimuth": 97.09120679219204,
      "elevation": 39.69586955578908,
      "range_km": 21756.026771286255,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G09",
      "prn": 9,
+     "time_system": "GPS",
      "azimuth": 133.93586750427656,
      "elevation": 71.82628964818832,
      "range_km": 20360.768329020808,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G14",
      "prn": 14,
+     "time_system": "GPS",
      "azimuth": 226.17395972587803,
      "elevation": 25.53397597403428,
      "range_km": 23300.168478664582,
      "ephemeris_age_s": 42.0
     },
     {
+     "sv": "G16",
      "prn": 16,
+     "time_system": "GPS",
      "azimuth": 42.65736333472452,
      "elevation": 5.258502998028103,
      "range_km": 25031.092815367243,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 297.62331180197583,
      "elevation": 17.566397042636275,
      "range_km": 23944.917502351916,
      "ephemeris_age_s": 1818.0
     },
     {
+     "sv": "G27",
      "prn": 27,
+     "time_system": "GPS",
      "azimuth": 59.95443756982078,
      "elevation": 24.503715818361833,
      "range_km": 22931.288922098112,
      "ephemeris_age_s": 1834.0
     },
     {
+     "sv": "G30",
      "prn": 30,
+     "time_system": "GPS",
      "azimuth": 295.9914465821579,
      "elevation": 37.04460608350021,
      "range_km": 22426.542274448217,
@@ -1202,7 +1493,8 @@
     "hdop": 0.9561783763952082,
     "vdop": 1.4173940384601713,
     "tdop": 0.8866716548974245,
-    "satellites": 9
+    "satellites": 9,
+    "systems": 1
    }
   },
   {
@@ -1214,79 +1506,102 @@
    "unix_seconds": 1735701300.0,
    "gps_seconds": 1419736518.0,
    "elevation_mask_deg": 5.0,
+   "systems": "G",
    "satellites": [
     {
+     "sv": "G05",
      "prn": 5,
+     "time_system": "GPS",
      "azimuth": 154.08504547689043,
      "elevation": 43.29689678326497,
      "range_km": 21739.41673291486,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G06",
      "prn": 6,
+     "time_system": "GPS",
      "azimuth": 44.939614856745735,
      "elevation": 14.680140365881638,
      "range_km": 24316.899327729006,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G11",
      "prn": 11,
+     "time_system": "GPS",
      "azimuth": 37.02984289244544,
      "elevation": 51.20187596243679,
      "range_km": 21339.014890972154,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G12",
      "prn": 12,
+     "time_system": "GPS",
      "azimuth": 158.17342467526748,
      "elevation": 79.5576817409057,
      "range_km": 20163.77530076327,
      "ephemeris_age_s": -2666.0
     },
     {
+     "sv": "G18",
      "prn": 18,
+     "time_system": "GPS",
      "azimuth": 233.53586852004074,
      "elevation": 6.045680060521567,
      "range_km": 25222.613159024368,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G19",
      "prn": 19,
+     "time_system": "GPS",
      "azimuth": 86.69718935430105,
      "elevation": 5.045891009377358,
      "range_km": 24960.60650878943,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G20",
      "prn": 20,
+     "time_system": "GPS",
      "azimuth": 95.86197357497339,
      "elevation": 56.668633723271576,
      "range_km": 21104.94746805605,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G24",
      "prn": 24,
+     "time_system": "GPS",
      "azimuth": 202.4530304865611,
      "elevation": 11.28073889001804,
      "range_km": 24963.34816336895,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G25",
      "prn": 25,
+     "time_system": "GPS",
      "azimuth": 308.53797587390017,
      "elevation": 55.56430890982839,
      "range_km": 20871.39692464865,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G28",
      "prn": 28,
+     "time_system": "GPS",
      "azimuth": 312.7559868185602,
      "elevation": 8.383969543717779,
      "range_km": 24875.982030837702,
      "ephemeris_age_s": -2682.0
     },
     {
+     "sv": "G29",
      "prn": 29,
+     "time_system": "GPS",
      "azimuth": 297.31880486626676,
      "elevation": 28.652867948987836,
      "range_km": 22930.8233079667,
@@ -1299,7 +1614,8 @@
     "hdop": 0.7610912280490075,
     "vdop": 0.9389407646874308,
     "tdop": 0.549664007294179,
-    "satellites": 11
+    "satellites": 11,
+    "systems": 1
    }
   }
  ]

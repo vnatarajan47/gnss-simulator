@@ -6,11 +6,11 @@
 //! written against [`Constellation`](crate::Constellation) rather than
 //! against GPS specifically.
 
-use crate::constants::SPEED_OF_LIGHT;
+use crate::constants::{beidou_geo, SPEED_OF_LIGHT};
 use crate::ephemeris::{BroadcastEphemeris, KeplerianEphemeris, Sv};
 use crate::geodesy::Ecef;
 use crate::time::GpsTime;
-use crate::Error;
+use crate::{Constellation, Error};
 
 /// Numerical settings for propagation.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -133,19 +133,55 @@ pub fn position_at(
     let x_orbital = corrected_radius * cos_u;
     let y_orbital = corrected_radius * sin_u;
 
+    // BeiDou's geostationary satellites take a different route from the
+    // orbital plane to Earth-fixed coordinates (BDS-SIS-ICD-B1I §5.2.4.12):
+    // their elements are referred to a plane tilted 5 deg out of the equator,
+    // and the Earth rotation is applied as an explicit rotation afterwards
+    // rather than folded into the node. Everything else — including BeiDou's
+    // IGSO and MEO satellites — uses the direct form.
+    let is_geostationary = is_beidou_geostationary(ephemeris);
+
     // Corrected longitude of ascending node. The final term uses ToE as raw
-    // seconds-of-week, per the ICD.
-    let omega_k = ephemeris.omega0 + (ephemeris.omega_dot - earth_rate) * t_k
-        - earth_rate * ephemeris.toe_seconds_of_week;
+    // seconds-of-week, per the ICD. The GEO form omits `-earth_rate * t_k`,
+    // because that rotation is applied separately below.
+    let node_rate = if is_geostationary {
+        ephemeris.omega_dot
+    } else {
+        ephemeris.omega_dot - earth_rate
+    };
+    let omega_k = ephemeris.omega0 + node_rate * t_k - earth_rate * ephemeris.toe_seconds_of_week;
 
     let (sin_omega, cos_omega) = omega_k.sin_cos();
     let (sin_i, cos_i) = corrected_inclination.sin_cos();
 
-    Ok(Ecef::new(
+    let position = Ecef::new(
         x_orbital * cos_omega - y_orbital * cos_i * sin_omega,
         x_orbital * sin_omega + y_orbital * cos_i * cos_omega,
         y_orbital * sin_i,
-    ))
+    );
+
+    if is_geostationary {
+        // `Rz(omega_e * t_k) * Rx(-5 deg)` in the ICD's frame-rotation
+        // convention; both signs flip when rotating the vector instead.
+        Ok(position
+            .rotate_x(beidou_geo::TILT_RAD)
+            .rotate_z(-earth_rate * t_k))
+    } else {
+        Ok(position)
+    }
+}
+
+/// Whether this record describes a BeiDou geostationary satellite, which needs
+/// the ICD's separate Earth-fixed transformation.
+///
+/// Decided from the broadcast inclination rather than from a PRN table: BeiDou
+/// GEOs sit within a fraction of a degree of the equatorial plane and its IGSO
+/// and MEO satellites near 55 deg, so the test is unambiguous and does not go
+/// stale as satellites are launched and retired. See
+/// [`beidou_geo::MAX_INCLINATION_RAD`].
+fn is_beidou_geostationary(ephemeris: &KeplerianEphemeris) -> bool {
+    ephemeris.sv.constellation == Constellation::BeiDou
+        && ephemeris.i0.abs() < beidou_geo::MAX_INCLINATION_RAD
 }
 
 /// ECEF position of the satellite as seen by an observer at `observer_ecef`
