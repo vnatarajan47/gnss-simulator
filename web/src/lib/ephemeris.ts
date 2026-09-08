@@ -15,8 +15,10 @@ export interface EphemerisMeta {
   date: string;
   /** Upstream filename the data came from. */
   source: string;
-  /** Ephemeris records after constellation filtering. */
+  /** Ephemeris records after constellation and time filtering. */
   records: number;
+  /** Size of the trimmed RINEX handed to WASM, in bytes. */
+  bytes: number;
   /** Served from the server-side disk cache rather than refetched. */
   cached: boolean;
   /**
@@ -53,6 +55,7 @@ export async function loadEphemerisRange(
   dates: string[],
   constellations: string,
   sbasPrns = "",
+  window?: { startS: number; endS: number },
 ): Promise<LoadedRange> {
   if (dates.length === 0) {
     throw new Error("no days requested");
@@ -60,7 +63,7 @@ export async function loadEphemerisRange(
 
   const started = performance.now();
   const loaded = await Promise.all(
-    dates.map((date) => fetchDay(date, constellations, sbasPrns)),
+    dates.map((date) => fetchDay(date, constellations, sbasPrns, window)),
   );
 
   const [first, ...rest] = loaded;
@@ -81,9 +84,10 @@ async function fetchDay(
   date: string,
   constellations: string,
   sbasPrns: string,
+  window?: { startS: number; endS: number },
 ): Promise<{ bytes: Uint8Array; meta: EphemerisMeta }> {
   const started = performance.now();
-  const response = await requestDay(date, constellations, sbasPrns);
+  const response = await requestDay(date, constellations, sbasPrns, window);
   const bytes = new Uint8Array(await response.arrayBuffer());
 
   return {
@@ -92,6 +96,7 @@ async function fetchDay(
       date,
       source: response.headers.get("X-Ephemeris-Source") ?? "unknown",
       records: Number(response.headers.get("X-Ephemeris-Records") ?? 0),
+      bytes: bytes.byteLength,
       cached: response.headers.get("X-Ephemeris-Cached") === "true",
       partial: response.headers.get("X-Ephemeris-Partial") === "true",
       elapsedMs: Math.round(performance.now() - started),
@@ -103,14 +108,22 @@ async function requestDay(
   date: string,
   constellations: string,
   sbasPrns: string,
+  window?: { startS: number; endS: number },
 ): Promise<Response> {
   // `v` participates in the cache key only: past-day responses are immutable,
   // so a change to the server-side trimming needs a new URL to reach clients.
+  //
+  // The window is sent whole rather than sliced per day: the route widens it
+  // by the curve-fit interval anyway, so the two requests of a
+  // midnight-spanning window differ only in `date`.
   const response = await fetch(
     `/api/ephemeris?date=${encodeURIComponent(date)}` +
       `&constellations=${encodeURIComponent(constellations)}` +
       `&v=${EPHEMERIS_FORMAT_VERSION}` +
-      (sbasPrns ? `&sbas=${encodeURIComponent(sbasPrns)}` : ""),
+      (sbasPrns ? `&sbas=${encodeURIComponent(sbasPrns)}` : "") +
+      (window
+        ? `&from=${Math.floor(window.startS)}&to=${Math.ceil(window.endS)}`
+        : ""),
   );
 
   if (!response.ok) {

@@ -32,7 +32,7 @@ export const COMPASS = [
   { label: "W", azimuth: 270 },
 ];
 
-/** Marker size: circle radius for the GNSS constellations, square half-side for SBAS. */
+/** Marker size: circle radius for moving satellites, square half-side for geostationary ones. */
 export const MARKER_RADIUS = 5;
 
 const LABEL_HEIGHT = 14;
@@ -89,11 +89,17 @@ export function elevationColour(elevationDeg: number): string {
 }
 
 /**
- * SBAS satellites are geostationary, which is worth showing: they never move,
- * and they sit in a tight clump rather than sweeping across the sky.
+ * Geostationary satellites are worth marking: they never move, and they sit in
+ * a tight clump rather than sweeping across the sky.
+ *
+ * The flag is computed in `gnss-core` from the broadcast orbital elements and
+ * carried across the WASM boundary. It used to be read off the `S` prefix,
+ * which was right only while SBAS was the only augmentation shown; BeiDou and
+ * QZSS both fly geostationary satellites of their own, and a satellite's
+ * identifier does not say which.
  */
 export function isGeostationary(satellite: Satellite): boolean {
-  return satellite.sv.startsWith("S");
+  return satellite.geostationary;
 }
 
 export function rectsOverlap(a: Rect, b: Rect): boolean {
@@ -139,7 +145,7 @@ export function pointOnRectTowards(rect: Rect, centre: Point, from: Point): Poin
 export interface LabelPlacement {
   satellite: Satellite;
   marker: Point;
-  isSbas: boolean;
+  isGeostationary: boolean;
   label: Rect & { text: string };
   /** True once the label has been pushed far enough to need a connecting line. */
   leader: boolean;
@@ -159,7 +165,7 @@ export function layoutLabels(satellites: Satellite[]): LabelPlacement[] {
   const markers = satellites.map((satellite) => ({
     satellite,
     point: project(satellite.azimuth, satellite.elevation),
-    isSbas: isGeostationary(satellite),
+    isGeostationary: isGeostationary(satellite),
   }));
 
   // Every marker is an obstacle from the start: a label must clear every
@@ -180,7 +186,7 @@ export function layoutLabels(satellites: Satellite[]): LabelPlacement[] {
   const placedLabels: Rect[] = [];
   const placements: LabelPlacement[] = [];
 
-  markers.forEach(({ satellite, point, isSbas }, index) => {
+  markers.forEach(({ satellite, point, isGeostationary }, index) => {
     // Full identifier, constellation code included: `G05`, `S131`. A bare `5`
     // is ambiguous once more than one constellation is on, and it would not
     // match the SV column in the table.
@@ -250,7 +256,7 @@ export function layoutLabels(satellites: Satellite[]): LabelPlacement[] {
     placements.push({
       satellite,
       marker: point,
-      isSbas,
+      isGeostationary,
       label: { ...chosen, text },
       leader: chosenRadius > LEADER_THRESHOLD,
       placed,

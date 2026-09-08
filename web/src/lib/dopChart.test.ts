@@ -23,7 +23,7 @@ import {
 import type { Dop, SkySeries } from "./types.ts";
 
 function dop(hdop: number, vdop: number): Dop {
-  return { gdop: 2, pdop: 1.8, hdop, vdop, tdop: 0.9, satellites: 9 };
+  return { gdop: 2, pdop: 1.8, hdop, vdop, tdop: 0.9, satellites: 9, systems: 1 };
 }
 
 function series(values: (Dop | null)[]): SkySeries {

@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use gnss_core::{
     dop_for, parse_nav, skyplot_from_set, Constellation, EphemerisSet, Geodetic, GpsTime,
-    SkyplotOptions,
+    SatelliteView, SkyplotOptions,
 };
 use serde::Deserialize;
 
@@ -363,5 +363,96 @@ fn parses_the_expected_shape_of_file() {
     assert!(
         qzss.contains(&"J07".to_string()) && qzss.contains(&"J08".to_string()),
         "expected QZSS's geostationary satellites, got {qzss:?}"
+    );
+}
+
+/// The geostationary flag has to be right for every constellation that flies
+/// one, because the sky plot draws those satellites differently and because
+/// BeiDou's take a different propagation path.
+///
+/// Checked against the orbits themselves rather than a PRN list: over three
+/// hours a geostationary satellite stays within a few degrees of where it was
+/// on the sky, and everything else sweeps tens of degrees. In this fixture the
+/// two populations are 2.6 deg and 19.3 deg at their closest — the nearest
+/// non-GEO is a BeiDou IGSO, which is geosynchronous but inclined, and tracing
+/// a figure-eight is exactly the thing the flag must not call standing still.
+///
+/// The measure is angular distance across the sky, not change in elevation.
+/// Elevation alone does not separate the two populations — a MEO caught at the
+/// top of its arc barely changes elevation while racing across in azimuth —
+/// and using it would make this a test of which satellites happened to be
+/// turning over.
+#[test]
+fn the_geostationary_flag_matches_what_the_orbits_do() {
+    /// Great-circle angle between two look directions [deg].
+    fn swept(a: &SatelliteView, b: &SatelliteView) -> f64 {
+        let (e1, e2) = (a.elevation_deg.to_radians(), b.elevation_deg.to_radians());
+        let delta_az = (a.azimuth_deg - b.azimuth_deg).to_radians();
+        (e1.sin() * e2.sin() + e1.cos() * e2.cos() * delta_az.cos())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+    }
+
+    let vectors = load_vectors();
+    let set = load_set(&vectors.source);
+
+    let options = SkyplotOptions {
+        elevation_mask_deg: 0.0,
+        constellations: vec![
+            Constellation::Gps,
+            Constellation::Galileo,
+            Constellation::BeiDou,
+            Constellation::Qzss,
+        ],
+        ..SkyplotOptions::default()
+    };
+    // Over south-east Asia, where BeiDou's and QZSS's geostationary satellites
+    // are all well up.
+    let observer = Geodetic::new(20.0, 110.0, 0.0);
+    let base = GpsTime::from_unix_seconds(1_786_186_800.0); // 2026-08-08T11:00Z
+
+    let at = |t: GpsTime| {
+        skyplot_from_set(&set, observer, t, &options)
+            .unwrap()
+            .satellites
+            .into_iter()
+            .map(|s| (s.sv.to_string(), s))
+            .collect::<BTreeMap<_, _>>()
+    };
+
+    let first = at(base);
+    let later = at(base.offset_by(3.0 * 3600.0));
+
+    let mut stationary = Vec::new();
+    for (sv, early) in &first {
+        let Some(late) = later.get(sv) else { continue };
+        let moved = swept(early, late);
+
+        if early.geostationary {
+            // Not zero: real geostationary satellites are allowed a small
+            // inclination and a slow drift, and BeiDou's C02 and C03 use it.
+            assert!(
+                moved < 5.0,
+                "{sv} is flagged geostationary but swept {moved:.1} deg across the sky in three hours"
+            );
+            stationary.push(sv.clone());
+        } else {
+            assert!(
+                moved > 10.0,
+                "{sv} is not flagged geostationary but swept only {moved:.1} deg in three hours"
+            );
+        }
+    }
+
+    // BeiDou and QZSS must both contribute, or this is only re-testing SBAS
+    // under another name.
+    assert!(
+        stationary.iter().any(|sv| sv.starts_with('C')),
+        "expected BeiDou geostationary satellites, got {stationary:?}"
+    );
+    assert!(
+        stationary.iter().any(|sv| sv.starts_with('J')),
+        "expected QZSS geostationary satellites, got {stationary:?}"
     );
 }

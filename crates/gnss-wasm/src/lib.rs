@@ -46,6 +46,11 @@ struct JsSatellite {
     range_km: f64,
     /// Signed `t - ToE` of the ephemeris used \[s\].
     ephemeris_age_s: f64,
+    /// Whether the satellite is geostationary, so the plot can mark it as
+    /// something that sits still rather than sweeps. Decided in `gnss-core`
+    /// from the broadcast elements -- it is no longer true that "SBAS" and
+    /// "geostationary" are the same set, since BeiDou and QZSS both fly GEOs.
+    geostationary: bool,
 }
 
 /// A computed sky view, as handed to JavaScript.
@@ -77,6 +82,7 @@ impl From<SkyView> for JsSkyView {
                     elevation: s.elevation_deg,
                     range_km: s.range_m / 1000.0,
                     ephemeris_age_s: s.ephemeris_age_s,
+                    geostationary: s.geostationary,
                 })
                 .collect(),
             visible_count: view.satellites.len(),
@@ -139,6 +145,8 @@ struct JsTrack {
     sv: String,
     prn: u8,
     source: String,
+    /// Whether the satellite is geostationary: its track is a point, not an arc.
+    geostationary: bool,
     /// Ascending by `epochIndex`, with gaps where the satellite was not up.
     /// A break in the run is a rise/set, and the renderer must not bridge it.
     samples: Vec<JsTrackSample>,
@@ -172,6 +180,7 @@ impl From<SkySeries> for JsSkySeries {
                     sv: track.sv.to_string(),
                     prn: track.sv.prn,
                     source: source_key(track.sv).to_string(),
+                    geostationary: track.geostationary,
                     samples: track
                         .samples
                         .iter()
@@ -462,12 +471,51 @@ mod tests {
         );
 
         let track = &json["tracks"][0];
-        assert_eq!(keys(track), sorted(&["sv", "prn", "source", "samples"]));
+        assert_eq!(
+            keys(track),
+            sorted(&["sv", "prn", "source", "geostationary", "samples"])
+        );
 
         let sample = &track["samples"][0];
         assert_eq!(
             keys(sample),
             sorted(&["epochIndex", "azimuth", "elevation", "rangeKm", "ephemerisAgeS"])
+        );
+    }
+
+    #[test]
+    fn the_single_epoch_view_serialises_the_field_names_typescript_expects() {
+        let view = skyplot_from_set(
+            &fixture(),
+            Geodetic::new(39.7392, -104.9903, 1609.0),
+            GpsTime::from_unix_seconds(START_UNIX),
+            &SkyplotOptions::default(),
+        )
+        .expect("view computes");
+        let json = serde_json::to_value(JsSkyView::from(view)).expect("serialises");
+
+        assert_eq!(
+            keys(&json),
+            sorted(&[
+                "satellites",
+                "visibleCount",
+                "belowMask",
+                "withoutEphemeris",
+                "gpsSeconds"
+            ])
+        );
+        assert_eq!(
+            keys(&json["satellites"][0]),
+            sorted(&[
+                "sv",
+                "prn",
+                "source",
+                "azimuth",
+                "elevation",
+                "rangeKm",
+                "ephemerisAgeS",
+                "geostationary"
+            ])
         );
     }
 

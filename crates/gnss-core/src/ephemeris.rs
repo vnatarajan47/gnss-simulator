@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::constants::geostationary;
 use crate::sbas::SbasEphemeris;
 use crate::time::GpsTime;
 use crate::Constellation;
@@ -161,6 +162,30 @@ impl KeplerianEphemeris {
     pub fn semi_major_axis(&self) -> f64 {
         self.sqrt_a * self.sqrt_a
     }
+
+    /// Whether these elements describe a geostationary satellite.
+    ///
+    /// Two conditions, because either alone admits something else: a
+    /// near-equatorial orbit at the wrong altitude is not geostationary, and a
+    /// GEO-radius orbit at 55 deg inclination is BeiDou's IGSO. Together they
+    /// are decisive, and both are read off the broadcast elements rather than a
+    /// PRN table -- which is what keeps this from going stale as satellites are
+    /// launched and retired.
+    ///
+    /// Used for two different things: BeiDou's geostationary satellites need a
+    /// different transformation into Earth-fixed coordinates, and every
+    /// geostationary satellite is worth drawing differently on a sky plot,
+    /// since it sits still where everything else sweeps past.
+    ///
+    /// BeiDou GEOs broadcast an inclination of a few degrees rather than zero,
+    /// because their elements are referred to a plane tilted 5 deg out of the
+    /// equator; the threshold accommodates that and still sits far below the
+    /// ~55 deg of any IGSO or MEO satellite.
+    pub fn is_geostationary(&self) -> bool {
+        self.i0.abs() < geostationary::MAX_INCLINATION_RAD
+            && (self.semi_major_axis() - geostationary::RADIUS_M).abs()
+                < geostationary::RADIUS_TOLERANCE_M
+    }
 }
 
 /// One broadcast navigation record, in whichever form its constellation uses.
@@ -226,6 +251,18 @@ impl BroadcastEphemeris {
     /// is still informative at the extreme.
     pub fn health_is_meaningful(&self) -> bool {
         matches!(self, BroadcastEphemeris::Keplerian(_))
+    }
+
+    /// Whether this record describes a geostationary satellite.
+    ///
+    /// True by definition for SBAS -- that is what an augmentation satellite
+    /// is -- and decided from the orbital elements for the rest, which is how
+    /// BeiDou's and QZSS's geostationary members are caught.
+    pub fn is_geostationary(&self) -> bool {
+        match self {
+            BroadcastEphemeris::Keplerian(e) => e.is_geostationary(),
+            BroadcastEphemeris::Sbas(_) => true,
+        }
     }
 
     /// Healthy, or health not meaningful for this record type.

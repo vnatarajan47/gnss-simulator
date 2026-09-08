@@ -61,6 +61,15 @@ pub struct SatelliteView {
     pub ephemeris_age_s: f64,
     /// Issue of data of the ephemeris used.
     pub iode: f64,
+    /// Whether this satellite is geostationary.
+    ///
+    /// Carried on the view rather than derived downstream because it is a
+    /// property of the broadcast elements, and the only place those are in
+    /// hand is here. A UI that tried to work it out from the satellite
+    /// identifier would be back to a PRN table that goes stale -- and it is no
+    /// longer only SBAS: BeiDou's C01-C05 and QZSS's J07/J08 are geostationary
+    /// too.
+    pub geostationary: bool,
 }
 
 /// The full result of a sky-view computation.
@@ -136,6 +145,7 @@ pub fn skyplot_from_set(
             range_m: angles.range_m,
             ephemeris_age_s: eph.age_at(t),
             iode: eph.issue_of_data(),
+            geostationary: eph.is_geostationary(),
         });
     }
 

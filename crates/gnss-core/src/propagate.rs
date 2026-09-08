@@ -174,14 +174,12 @@ pub fn position_at(
 /// Whether this record describes a BeiDou geostationary satellite, which needs
 /// the ICD's separate Earth-fixed transformation.
 ///
-/// Decided from the broadcast inclination rather than from a PRN table: BeiDou
-/// GEOs sit within a fraction of a degree of the equatorial plane and its IGSO
-/// and MEO satellites near 55 deg, so the test is unambiguous and does not go
-/// stale as satellites are launched and retired. See
-/// [`beidou_geo::MAX_INCLINATION_RAD`].
+/// The geostationary test itself is
+/// [`KeplerianEphemeris::is_geostationary`] -- read off the broadcast
+/// elements, not a PRN table. Only BeiDou changes propagation because of it;
+/// QZSS's geostationary satellites follow the ordinary algorithm.
 fn is_beidou_geostationary(ephemeris: &KeplerianEphemeris) -> bool {
-    ephemeris.sv.constellation == Constellation::BeiDou
-        && ephemeris.i0.abs() < beidou_geo::MAX_INCLINATION_RAD
+    ephemeris.sv.constellation == Constellation::BeiDou && ephemeris.is_geostationary()
 }
 
 /// ECEF position of the satellite as seen by an observer at `observer_ecef`
