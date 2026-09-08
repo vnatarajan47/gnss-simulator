@@ -98,6 +98,11 @@ struct JsDop {
     tdop: f64,
     /// How many satellites entered the solution.
     satellites: usize,
+    /// How many distinct time systems they spanned, i.e. how many clock
+    /// unknowns were solved for. Surfaced because it changes what the numbers
+    /// mean: a two-system GDOP is solving for one more unknown than a
+    /// one-system GDOP, and needs one more satellite before it exists at all.
+    systems: usize,
 }
 
 impl From<Dop> for JsDop {
@@ -109,6 +114,7 @@ impl From<Dop> for JsDop {
             vdop: d.vdop,
             tdop: d.tdop,
             satellites: d.satellites,
+            systems: d.systems,
         }
     }
 }
@@ -477,7 +483,15 @@ mod tests {
 
         assert_eq!(
             keys(dop),
-            sorted(&["gdop", "pdop", "hdop", "vdop", "tdop", "satellites"])
+            sorted(&[
+                "gdop",
+                "pdop",
+                "hdop",
+                "vdop",
+                "tdop",
+                "satellites",
+                "systems"
+            ])
         );
     }
 
@@ -550,6 +564,41 @@ mod tests {
             options_for(None, None).constellations,
             SkyplotOptions::default().constellations
         );
+    }
+
+    #[test]
+    fn every_ui_source_key_maps_to_something() {
+        // The keys the web app ships in `coverage.ts`. A typo on either side
+        // is silent -- an unrecognised key is ignored by design -- so the full
+        // set is asserted here rather than discovered as an empty sky plot.
+        let sources = vec![
+            "GPS".to_string(),
+            "GALILEO".to_string(),
+            "BEIDOU".to_string(),
+            "QZSS".to_string(),
+            "WAAS".to_string(),
+            "EGNOS".to_string(),
+            "MSAS".to_string(),
+            "GAGAN".to_string(),
+            "SDCM".to_string(),
+            "BDSBAS".to_string(),
+            "KASS".to_string(),
+            "SOUTHPAN".to_string(),
+            "SBAS-OTHER".to_string(),
+        ];
+        let options = options_for(None, Some(sources));
+
+        assert_eq!(
+            options.constellations,
+            vec![
+                Constellation::Gps,
+                Constellation::Galileo,
+                Constellation::BeiDou,
+                Constellation::Qzss,
+                Constellation::Sbas,
+            ]
+        );
+        assert_eq!(options.sbas_providers.len(), 9);
     }
 
     #[test]

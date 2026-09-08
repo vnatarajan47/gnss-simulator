@@ -376,8 +376,8 @@ mod tests {
     /// WAAS track must be unbroken and its position must barely move.
     #[test]
     fn geostationary_tracks_are_continuous_and_nearly_still() {
-        let bytes = std::fs::read("../../data/WAAS_20262201100_02H_SN.rnx")
-            .expect("WAAS fixture present");
+        let bytes = std::fs::read("../../data/SBAS_20262201100_02H_SN.rnx.gz")
+            .expect("SBAS fixture present");
         let set = parse_nav(&bytes).expect("fixture parses");
 
         let start = GpsTime::from_unix_seconds(EPOCH_UNIX);

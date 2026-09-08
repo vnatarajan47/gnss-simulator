@@ -139,10 +139,22 @@ fn to_gps_time(constellation: Constellation, week: u32, seconds_of_week: f64) ->
 
 /// Pull the orbital elements out of a parsed `rinex` ephemeris frame.
 ///
-/// Returns `None` if any required field is missing, which happens for frame
-/// types that share the `Ephemeris` container but carry a different payload.
+/// Returns `None` only if one of the *defining* elements is missing, which
+/// happens for frame types that share the `Ephemeris` container but carry a
+/// different payload. Perturbation terms — the harmonic corrections and the
+/// two rate terms — default to zero instead.
+///
+/// That distinction is not pedantry. The `rinex` crate does not surface an
+/// orbit field whose broadcast value is exactly zero, so a legitimately zero
+/// perturbation is indistinguishable from an absent one. Requiring them all
+/// silently discarded QZSS's two geostationary satellites (J07, J08), which
+/// broadcast `deltaN` and `idot` as exact zeros. A missing perturbation means
+/// no perturbation, and zero is the right reading; a missing semi-major axis
+/// means the record is not an orbit at all.
 fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<KeplerianEphemeris> {
     let field = |name: &str| frame.get_orbit_f64(name);
+    // Perturbations and rates: absent is zero, see above.
+    let rate_or_zero = |name: &str| field(name).unwrap_or(0.0);
 
     let week = field("week")? as u32;
     let toe_seconds_of_week = field("toe")?;
@@ -163,22 +175,30 @@ fn lift_ephemeris(sv: Sv, frame: &rinex::navigation::Ephemeris) -> Option<Kepler
         argument_of_perigee: field("omega")?,
         mean_anomaly_0: field("m0")?,
 
-        delta_n: field("deltaN")?,
-        i_dot: field("idot")?,
-        omega_dot: field("omegaDot")?,
+        delta_n: rate_or_zero("deltaN"),
+        i_dot: rate_or_zero("idot"),
+        omega_dot: rate_or_zero("omegaDot"),
 
-        cuc: field("cuc")?,
-        cus: field("cus")?,
-        crc: field("crc")?,
-        crs: field("crs")?,
-        cic: field("cic")?,
-        cis: field("cis")?,
+        cuc: rate_or_zero("cuc"),
+        cus: rate_or_zero("cus"),
+        crc: rate_or_zero("crc"),
+        crs: rate_or_zero("crs"),
+        cic: rate_or_zero("cic"),
+        cis: rate_or_zero("cis"),
 
         af0: frame.clock_bias,
         af1: frame.clock_drift,
         af2: frame.clock_drift_rate,
 
-        iode: field("iode").unwrap_or(f64::NAN),
+        // Issue of data goes by a different name in each ICD, and the parser
+        // keeps the ICD's name. Reading only `iode` left Galileo and BeiDou
+        // with NaN, which quietly disabled both the duplicate-block check in
+        // `EphemerisSet::insert` (NaN != NaN, so re-broadcasts across the
+        // midnight overlap accumulated) and the selection tie-break.
+        iode: field("iode")
+            .or_else(|| field("iodnav"))
+            .or_else(|| field("aode"))
+            .unwrap_or(f64::NAN),
         // Absent health word is treated as healthy: a missing field means the
         // record did not carry one, not that the satellite is unusable.
         health: field("health").map_or(0, |h| h as u16),
@@ -200,23 +220,22 @@ fn lift_sbas(
     epoch: rinex::prelude::Epoch,
     frame: &rinex::navigation::Ephemeris,
 ) -> Option<SbasEphemeris> {
-    let field = |name: &str| frame.get_orbit_f64(name);
+    let field = |name: &str| frame.get_orbit_f64(name).unwrap_or(0.0);
 
-    let (px, py, pz) = (field("satPosX")?, field("satPosY")?, field("satPosZ")?);
+    // Absent reads as zero here for the same reason as in `lift_ephemeris`:
+    // the parser does not surface an orbit field whose value is exactly zero,
+    // and a geostationary satellite sitting exactly on the equator broadcasts
+    // `satPosZ` as an exact zero. Requiring the field present discarded every
+    // such record -- which was all of EGNOS and SouthPAN. Nothing is lost by
+    // defaulting: a genuinely absent position collapses to the origin, and
+    // `decode_scale` rejects that along with the other implausible radii.
+    let (px, py, pz) = (field("satPosX"), field("satPosY"), field("satPosZ"));
 
     // Rejects placeholders as well as deciding km vs m.
     let scale = sbas::decode_scale(px, py, pz)?;
 
-    let (vx, vy, vz) = (
-        field("velX").unwrap_or(0.0),
-        field("velY").unwrap_or(0.0),
-        field("velZ").unwrap_or(0.0),
-    );
-    let (ax, ay, az) = (
-        field("accelX").unwrap_or(0.0),
-        field("accelY").unwrap_or(0.0),
-        field("accelZ").unwrap_or(0.0),
-    );
+    let (vx, vy, vz) = (field("velX"), field("velY"), field("velZ"));
+    let (ax, ay, az) = (field("accelX"), field("accelY"), field("accelZ"));
 
     // SBAS has no week/ToE fields: the state vector's reference epoch is the
     // record's own epoch, which the parser has already resolved.
@@ -228,9 +247,9 @@ fn lift_sbas(
         position_m: Ecef::new(px * scale, py * scale, pz * scale),
         velocity_m_s: Ecef::new(vx * scale, vy * scale, vz * scale),
         acceleration_m_s2: Ecef::new(ax * scale, ay * scale, az * scale),
-        health: field("health").map_or(0, |h| h as u16),
-        accuracy_index: field("accuracy").unwrap_or(f64::NAN),
-        iodn: field("iodn").unwrap_or(f64::NAN),
+        health: field("health") as u16,
+        accuracy_index: field("accuracy"),
+        iodn: field("iodn"),
     })
 }
 

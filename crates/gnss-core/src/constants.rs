@@ -5,7 +5,7 @@
 //! consistent when propagated with the *same* constants the control segment
 //! used to fit them.
 
-use crate::Constellation;
+use crate::{Constellation, TimeSystem};
 
 /// WGS-84 reference ellipsoid (NIMA TR8350.2).
 pub mod wgs84 {
@@ -90,6 +90,20 @@ impl Constellation {
         }
     }
 
+    /// The time scale this constellation's ranging signals are expressed in.
+    ///
+    /// Coarser than the constellation itself, because several systems are
+    /// deliberately steered to GPS time. Consumed by [`crate::dop`], which
+    /// needs one clock unknown per distinct scale — see [`TimeSystem`] for why
+    /// each constellation lands where it does.
+    pub const fn time_system(self) -> TimeSystem {
+        match self {
+            Constellation::Gps | Constellation::Qzss | Constellation::Sbas => TimeSystem::Gps,
+            Constellation::Galileo => TimeSystem::Galileo,
+            Constellation::BeiDou => TimeSystem::BeiDou,
+        }
+    }
+
     /// Default curve-fit half-interval \[s\]: how far either side of ToE a
     /// broadcast ephemeris is considered usable.
     ///
@@ -108,4 +122,34 @@ impl Constellation {
             Constellation::Sbas => 900.0,
         }
     }
+}
+
+/// BeiDou geostationary orbit handling (BDS-SIS-ICD-B1I §5.2.4.12).
+///
+/// BeiDou's GEO satellites are propagated by the same Keplerian algorithm as
+/// everything else and then rotated into the Earth-fixed frame differently:
+/// through `Rz(omega_e * t_k) * Rx(-5 deg)` instead of the direct rotation.
+/// Skipping it puts a BeiDou GEO thousands of kilometres from where it is.
+pub mod beidou_geo {
+    /// Fixed tilt applied to a BeiDou GEO position \[rad\].
+    ///
+    /// The ICD writes it as `Rx(-5 deg)`, where `Rx` rotates the *frame*.
+    /// Rotating the vector instead flips the sign, and rotating the vector is
+    /// what [`crate::geodesy::Ecef::rotate_x`] does — so the value is stored
+    /// in the vector-rotation sense and the call site carries no sign to get
+    /// wrong.
+    pub const TILT_RAD: f64 = 5.0 * std::f64::consts::PI / 180.0;
+
+    /// Inclination below which a BeiDou satellite is treated as geostationary
+    /// \[rad\].
+    ///
+    /// Decided from the broadcast elements rather than from a PRN table, for
+    /// the same reason [`crate::sbas::decode_scale`] decides units physically:
+    /// PRN-to-orbit assignments change as satellites are launched and retired,
+    /// and a stale table is a silent error where a physical test is not.
+    /// BeiDou GEOs are within a fraction of a degree of the equatorial plane
+    /// while its IGSO and MEO satellites sit near 55 deg, so the two are
+    /// separated by two orders of magnitude and any threshold between them
+    /// gives the same answer.
+    pub const MAX_INCLINATION_RAD: f64 = 10.0 * std::f64::consts::PI / 180.0;
 }

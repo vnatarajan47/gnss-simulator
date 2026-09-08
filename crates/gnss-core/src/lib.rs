@@ -24,12 +24,18 @@
 //!
 //! ## Constellation support
 //!
-//! Phase 1 targets GPS. Galileo, BeiDou and QZSS broadcast the same Keplerian
-//! parameter set, so [`propagate`] already handles them; enabling one is a
-//! matter of adding it to [`SkyplotOptions::constellations`]. GLONASS is a
-//! different problem entirely -- it broadcasts a position/velocity state
-//! vector requiring numerical integration, not Keplerian elements -- and is
-//! out of scope.
+//! GPS, Galileo, BeiDou and QZSS broadcast the same Keplerian parameter set
+//! and share [`propagate`], differing only in constants and — for BeiDou's
+//! geostationary satellites — one extra frame rotation. SBAS broadcasts an
+//! ECEF state vector instead and takes the [`sbas`] path. Which of them a
+//! given call includes is [`SkyplotOptions::constellations`].
+//!
+//! Mixing them is not free: satellites from different constellations do not
+//! share a clock, so [`dop`] carries one clock unknown per [`TimeSystem`] and
+//! needs one more satellite for each. GLONASS remains out of scope — it
+//! broadcasts a state vector requiring numerical integration of the equations
+//! of motion, which is a third propagator rather than a variation on either
+//! of these.
 
 pub mod constants;
 pub mod dop;
@@ -42,7 +48,7 @@ pub mod skyplot;
 pub mod source;
 pub mod time;
 
-pub use dop::{dop_for, dop_from_angles, Dop};
+pub use dop::{dop_for, dop_from_angles, dop_from_observations, min_satellites, Dop};
 pub use ephemeris::{
     BroadcastEphemeris, EphemerisSet, KeplerianEphemeris, SelectionConfig, SelectionStrategy, Sv,
 };
@@ -73,6 +79,37 @@ pub enum Constellation {
     Qzss,
     /// Satellite-based augmentation: WAAS, EGNOS, MSAS, and friends.
     Sbas,
+}
+
+/// The time reference a constellation's ranging signals are expressed in.
+///
+/// A receiver solving with satellites from two of these cannot assume their
+/// clocks agree: it has to estimate the offset between them as an extra
+/// unknown. That is why this is a *coarser* grouping than [`Constellation`] —
+/// what matters is which satellites share a clock, not who operates them.
+///
+/// - QZSS is steered to GPS time and specified for GPS-interoperable use.
+/// - SBAS ranging signals are GPS-time coherent by design; that is the whole
+///   point of an augmentation system.
+/// - Galileo System Time is held close to GPS time, but the offset is a
+///   broadcast quantity (the GGTO) rather than zero, so a receiver estimates
+///   it. Grouping Galileo with GPS would understate the unknowns.
+/// - BeiDou time is a separate scale entirely, 14 s from GPS time.
+///
+/// The ordering is the column order in the DOP design matrix, and the lowest
+/// system present is the reference clock — see [`dop::Dop::tdop`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TimeSystem {
+    /// GPS, and everything steered to it: QZSS and SBAS.
+    Gps,
+    Galileo,
+    BeiDou,
+}
+
+impl TimeSystem {
+    /// How many distinct time systems exist, i.e. the widest set of clock
+    /// unknowns a solution can carry.
+    pub const COUNT: usize = 3;
 }
 
 /// Errors produced by this crate.

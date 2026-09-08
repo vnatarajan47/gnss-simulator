@@ -51,6 +51,11 @@ impl SbasProvider {
     ///
     /// Assignments as published for 2025-2026. Adding a satellite is one line
     /// here; nothing downstream needs to change.
+    ///
+    /// PRNs outside the table fall to [`SbasProvider::Unknown`] rather than
+    /// being dropped -- 142 and 148 appear in the archive with no assignment
+    /// published, and showing them under a plainly provisional label is more
+    /// honest than either guessing an operator or hiding a real satellite.
     pub const fn from_prn(prn: u8) -> Self {
         match prn {
             131 | 133 | 135 | 138 => SbasProvider::Waas,
@@ -228,6 +233,33 @@ mod tests {
         assert_eq!(decode_scale(0.0, 0.0, 0.0), None);
         // A low-Earth-orbit radius is not a GEO under either reading.
         assert_eq!(decode_scale(7000.0, 0.0, 0.0), None);
+    }
+
+    /// The daily almanac-style filler these files carry for satellites with no
+    /// real state vector, taken verbatim from a 2026 broadcast product.
+    ///
+    /// The give-away is `z = 32767`, a saturated 16-bit field. In kilometres
+    /// that puts the satellite 53 000 km out and in metres 53 km up, so
+    /// neither reading is a GEO and the physical test rejects it without
+    /// needing to know about the sentinel at all. Worth pinning down: these
+    /// records are what KASS and PRN 142 consist of for a whole day, and
+    /// accepting one would draw a satellite that is not there.
+    #[test]
+    fn the_saturated_daily_filler_is_rejected() {
+        // KASS (PRN 134) and PRN 142, 2026-08-08.
+        assert_eq!(decode_scale(-1.10263976e3, 4.214957984e4, 3.2767e4), None);
+        assert_eq!(decode_scale(-1.851726432e4, 3.796601824e4, 3.2767e4), None);
+    }
+
+    /// A geostationary satellite exactly on the equator broadcasts `z = 0`,
+    /// which must not be mistaken for a missing or placeholder record. EGNOS
+    /// and SouthPAN are entirely made of these.
+    #[test]
+    fn an_exactly_equatorial_geo_is_accepted() {
+        // EGNOS PRN 121 as broadcast, in metres.
+        assert_eq!(decode_scale(4.2004684e7, -3.67493296e6, 0.0), Some(1.0));
+        // SouthPAN PRN 122 as broadcast, in kilometres.
+        assert_eq!(decode_scale(-3.3893928e4, 2.5080188e4, 0.0), Some(1000.0));
     }
 
     /// With zero velocity — correct for an ideal geostationary satellite in

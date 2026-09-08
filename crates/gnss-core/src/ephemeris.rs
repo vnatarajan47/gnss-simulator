@@ -120,14 +120,36 @@ pub struct KeplerianEphemeris {
 
     /// Issue of data, ephemeris. Distinguishes successive uploads.
     pub iode: f64,
-    /// Raw SV health word; 0 means healthy for every constellation we support.
+    /// Raw SV health word, as broadcast. Interpreted by [`Self::is_healthy`],
+    /// which is not the same rule for every constellation.
     pub health: u16,
 }
 
+/// Every bit of the six-bit health field set: the all-ones filler.
+const HEALTH_ALL_BITS: u16 = 0b11_1111;
+
 impl KeplerianEphemeris {
     /// Whether the transmitting satellite reported itself healthy.
+    ///
+    /// Zero means healthy for GPS, Galileo and BeiDou, and the rule earns its
+    /// keep: it is what excludes GPS satellites broadcasting 63, and Galileo's
+    /// E14 and E18 — the pair stranded in eccentric orbits, flagged unusable
+    /// for the Open Service every day of the archive.
+    ///
+    /// QZSS is the exception. Its health word is a per-signal bitfield, and in
+    /// this product *no* QZSS record ever reads zero: bits for signals a given
+    /// satellite does not broadcast stay set, so J02/J03/J07 sit permanently
+    /// at 1 and J04/J08 at 16. Applying the zero rule would silently discard
+    /// the entire constellation — the same trap SBAS sets, and handled the
+    /// same way. Only the all-ones word is treated as unusable, since no
+    /// per-signal combination reads as "every signal on this satellite is
+    /// simultaneously fine". Decoding the bits individually
+    /// (IS-QZSS-PNT §4.1.2.3) is the proper fix and is deferred.
     pub fn is_healthy(&self) -> bool {
-        self.health == 0
+        match self.sv.constellation {
+            Constellation::Qzss => self.health != HEALTH_ALL_BITS,
+            _ => self.health == 0,
+        }
     }
 
     /// Age of this ephemeris relative to `t`, signed \[s\].
@@ -195,10 +217,13 @@ impl BroadcastEphemeris {
 
     /// Whether health filtering should be applied to this record at all.
     ///
-    /// Only the Keplerian constellations carry a health word we trust. The
-    /// SBAS field in the merged IGS product is dominated by all-ones fillers
-    /// even for operational satellites, so gating on it would discard the
-    /// whole constellation -- see [`SbasEphemeris::health`].
+    /// Only the Keplerian constellations carry a health word worth gating on.
+    /// The SBAS field in the merged IGS product is dominated by all-ones
+    /// fillers even for operational satellites, so gating on it would discard
+    /// the whole constellation -- see [`SbasEphemeris::health`]. QZSS has a
+    /// milder form of the same problem, handled inside
+    /// [`KeplerianEphemeris::is_healthy`] rather than here, because its word
+    /// is still informative at the extreme.
     pub fn health_is_meaningful(&self) -> bool {
         matches!(self, BroadcastEphemeris::Keplerian(_))
     }
@@ -368,16 +393,20 @@ impl EphemerisSet {
         });
 
         match config.strategy {
-            // Ties (a block re-issued with the same ToE) resolve to the later
-            // issue of data, which is the more recent upload.
+            // Ties (the same ToE broadcast twice) resolve to the *higher*
+            // issue of data, the more recent upload -- hence the reversed
+            // comparison, since this is a `min_by`. Galileo makes the tie
+            // routine rather than theoretical: it broadcasts I/NAV and F/NAV
+            // records sharing a ToE but fitted separately, so which one is
+            // picked is a visible choice and must at least be a stable one.
             SelectionStrategy::NearestToe => candidates.min_by(|a, b| {
                 a.age_at(t)
                     .abs()
                     .partial_cmp(&b.age_at(t).abs())
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then(
-                        a.issue_of_data()
-                            .partial_cmp(&b.issue_of_data())
+                        b.issue_of_data()
+                            .partial_cmp(&a.issue_of_data())
                             .unwrap_or(std::cmp::Ordering::Equal),
                     )
             }),
@@ -529,6 +558,25 @@ mod tests {
         assert_eq!(toes, vec![7200.0, 14400.0, 21600.0]);
     }
 
+    /// Two blocks with the same ToE is the ordinary Galileo case (I/NAV and
+    /// F/NAV), so the tie-break has to be both defined and documented.
+    #[test]
+    fn a_tie_on_age_resolves_to_the_higher_issue_of_data() {
+        let mut set = EphemerisSet::new();
+        set.insert(stub(1, 7200.0, 5.0, 0));
+        set.insert(stub(1, 7200.0, 9.0, 0));
+
+        let t = GpsTime::from_week_and_sow(2347, 7200.0);
+        let chosen = set
+            .select(
+                Sv::new(Constellation::Gps, 1),
+                t,
+                SelectionConfig::default(),
+            )
+            .expect("both blocks are in range");
+        assert_eq!(keplerian_of(chosen).iode, 9.0);
+    }
+
     #[test]
     fn nearest_toe_can_select_a_block_from_the_future() {
         let mut set = EphemerisSet::new();
@@ -578,6 +626,30 @@ mod tests {
                 SelectionConfig::default()
             )
             .is_none());
+    }
+
+    /// QZSS never broadcasts a zero health word in this product, so the GPS
+    /// rule would discard the constellation outright.
+    #[test]
+    fn qzss_health_only_excludes_the_all_ones_word() {
+        let qzss = |health: u16| {
+            let mut eph = stub(2, 7200.0, 1.0, health);
+            eph.sv = Sv::new(Constellation::Qzss, 2);
+            eph
+        };
+
+        // The values every operational QZSS satellite actually broadcasts.
+        assert!(qzss(1).is_healthy());
+        assert!(qzss(16).is_healthy());
+        assert!(qzss(0).is_healthy());
+        // All bits set is the one word that cannot mean a working satellite.
+        assert!(!qzss(0b11_1111).is_healthy());
+
+        // The other constellations keep the strict rule; 1 and 16 are real
+        // Galileo signal-health flags and must still exclude.
+        let mut galileo = stub(1, 7200.0, 1.0, 16);
+        galileo.sv = Sv::new(Constellation::Galileo, 14);
+        assert!(!galileo.is_healthy());
     }
 
     #[test]
