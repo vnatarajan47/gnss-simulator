@@ -17,6 +17,7 @@ crates/gnss-core/   Rust: RINEX parsing, ephemeris propagation, az/el geometry
 crates/gnss-wasm/   wasm-bindgen wrapper: compute_skyplot(), Skyplotter{skyplot,skyplot_series,extend}
 web/                Next.js (App Router, TypeScript), Leaflet map + SVG sky plot
 data/                test fixtures + data/cache/ (disk cache, gitignored)
+docs/methods.md      full methods reference: math, data sources, validation, error budget
 docs/adr/            architecture decision records (0001-0008)
 tools/               reference_skyplot.py -- independent Python implementation used only to validate the Rust math
 ```
@@ -100,6 +101,11 @@ I/NAV and F/NAV records sharing a ToE but fitted separately, so ties are
 routine and the higher issue of data wins.
 
 ### Validation standard
+
+> The full write-up -- every algorithm, constant, data defect and validation
+> result -- is `docs/methods.md`. Keep it in step when any of this changes; it
+> is the document a reader is pointed at first.
+
 
 No source is switched on in the UI (`web/src/lib/coverage.ts`, `SOURCES[]`,
 `status: "unvalidated"`) until it has an independent cross-check appropriate to
