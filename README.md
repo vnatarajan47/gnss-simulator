@@ -6,6 +6,8 @@ satellite with its track across the window, plus HDOP and VDOP against time —
 azimuth and elevation computed from RINEX broadcast ephemeris, entirely in the
 browser via WebAssembly.
 
+**Live preview: <https://gnss-simulator.vercel.app>**
+
 GPS, Galileo, BeiDou and QZSS are supported, along with six satellite-based
 augmentation systems (WAAS, EGNOS, MSAS, GAGAN, BDSBAS and SouthPAN).
 
