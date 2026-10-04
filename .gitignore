@@ -2,9 +2,13 @@
 /target
 **/*.rs.bk
 
-# wasm-pack output (generated into the web app)
+# wasm-pack output. `/crates/gnss-wasm/pkg` is the crate's own default
+# out-dir, unused in practice -- `build:wasm` redirects straight to
+# `/web/src/wasm`, which IS committed: Vercel's build image has no Rust
+# toolchain, so the compiled module has to already be in the tree for
+# `next build` to pick up. Rebuild it with `npm run build:wasm` before
+# committing whenever gnss-core or gnss-wasm changes, and commit the result.
 /crates/gnss-wasm/pkg
-/web/src/wasm
 
 # Node / Next.js
 node_modules

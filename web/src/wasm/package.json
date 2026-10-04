@@ -1,0 +1,17 @@
+{
+  "name": "gnss-wasm",
+  "type": "module",
+  "description": "wasm-bindgen bindings for gnss-core",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "gnss_wasm_bg.wasm",
+    "gnss_wasm.js",
+    "gnss_wasm.d.ts"
+  ],
+  "main": "gnss_wasm.js",
+  "types": "gnss_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

@@ -312,6 +312,14 @@ cd web && npm run build       # production build, for deployment
 Deployment needs a writable `EPHEMERIS_CACHE_DIR` (optional -- it falls back to
 the system temp dir) and outbound access to `igs.bkg.bund.de`. Nothing else.
 
+Hosted on Vercel (free tier): project `gnss-simulator`, **Root Directory `web`**.
+`web/src/wasm/` is **committed**, because Vercel's build image has no Rust
+toolchain. That is a trap: change `gnss-core` or `gnss-wasm`, forget
+`npm run build:wasm`, and you ship a stale module with no error anywhere. Always
+rebuild and commit `web/src/wasm/` in the same commit as the Rust change. (wasm-pack writes a
+`.gitignore` containing `*` into that directory; `build:wasm` removes it so the
+output stays trackable.)
+
 ## Roadmap
 
 1. **Phase 1 -- done.** Static sky plot for any point/time, GPS + WAAS,

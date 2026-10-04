@@ -279,9 +279,15 @@ export async function GET(request: Request) {
     : null;
 
   // Optional time-window narrowing, in Unix seconds. Absent means "keep the
-  // whole day", which is what a caller that has not been updated will get.
-  const fromS = Number(params.get("from"));
-  const toS = Number(params.get("to"));
+  // whole day", which is what a caller that has not been updated will get --
+  // and which is why an absent param must become `NaN`, not `0`. `Number(null)`
+  // is `0`, not `NaN`, so coercing `params.get(...)` directly would silently
+  // window every omitted-param request to the Unix epoch and reject the whole
+  // file instead of leaving it unfiltered.
+  const fromParam = params.get("from");
+  const toParam = params.get("to");
+  const fromS = fromParam === null ? NaN : Number(fromParam);
+  const toS = toParam === null ? NaN : Number(toParam);
   const window =
     Number.isFinite(fromS) && Number.isFinite(toS) && toS >= fromS
       ? { fromS, toS }

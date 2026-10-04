@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build:wasm": "cd ../crates/gnss-wasm && wasm-pack build --target web --out-dir ../../web/src/wasm --out-name gnss_wasm",
+    "build:wasm": "cd ../crates/gnss-wasm && wasm-pack build --target web --out-dir ../../web/src/wasm --out-name gnss_wasm && rm -f ../../web/src/wasm/.gitignore",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
